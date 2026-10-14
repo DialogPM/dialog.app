@@ -1,0 +1,15 @@
+[package]
+name = "voice-fx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Real-time voice effects (anonymous, deep, chipmunk, robot, hall) for calls and voice notes"
+
+# Also built for wasm32-unknown-unknown (the desktop call audio worklet, app/src/lib/voiceFx.ts):
+# dependencies stay few and pure Rust, and processing does not allocate.
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+# RNNoise (Xiph, BSD-3-Clause) in pure Rust: the "noise reduction" stage.
+nnnoiseless = { version = "0.5", default-features = false }

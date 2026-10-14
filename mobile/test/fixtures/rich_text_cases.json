@@ -1,0 +1,573 @@
+[
+ {
+  "text": "plain text",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "plain text",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "plain text"
+ },
+ {
+  "text": "*bold* and _italic_ and ~strike~",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "bold",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": " and ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "italic",
+    "c": [
+     {
+      "k": "text",
+      "text": "italic",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": " and ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "strike",
+    "c": [
+     {
+      "k": "text",
+      "text": "strike",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "bold and italic and strike"
+ },
+ {
+  "text": "nested *bold _it_ end*",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "nested ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "bold ",
+      "href": null,
+      "id": null
+     },
+     {
+      "k": "italic",
+      "c": [
+       {
+        "k": "text",
+        "text": "it",
+        "href": null,
+        "id": null
+       }
+      ]
+     },
+     {
+      "k": "text",
+      "text": " end",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "nested bold it end"
+ },
+ {
+  "text": "a*b*c is not bold, 2*3*4 neither",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "a*b*c is not bold, 2*3*4 neither",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "a*b*c is not bold, 2*3*4 neither"
+ },
+ {
+  "text": "* not bold *",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "* not bold *",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "* not bold *"
+ },
+ {
+  "text": "`code *x*` and ```\nblock _y_\n```",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "code",
+    "text": "code *x*",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "text",
+    "text": " and ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "pre",
+    "text": "block _y_",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "code *x* and block _y_"
+ },
+ {
+  "text": "see https://ex.com/a_b_c and _it_",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "see ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "link",
+    "text": "https://ex.com/a_b_c",
+    "href": "https://ex.com/a_b_c",
+    "id": null
+   },
+   {
+    "k": "text",
+    "text": " and ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "italic",
+    "c": [
+     {
+      "k": "text",
+      "text": "it",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "see https://ex.com/a_b_c and it"
+ },
+ {
+  "text": "Salut @Bob 😀 *ce* faci?",
+  "mentions": [
+   {
+    "account_id": "11111111-2222-4333-8444-555555555555",
+    "start": 6,
+    "length": 4
+   }
+  ],
+  "segs": [
+   {
+    "k": "text",
+    "text": "Salut ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "mention",
+    "text": "@Bob",
+    "href": null,
+    "id": "11111111-2222-4333-8444-555555555555"
+   },
+   {
+    "k": "text",
+    "text": " 😀 ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "ce",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": " faci?",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "Salut @Bob 😀 ce faci?"
+ },
+ {
+  "text": "*@Ana_M bold*",
+  "mentions": [
+   {
+    "account_id": "11111111-2222-4333-8444-555555555555",
+    "start": 1,
+    "length": 6
+   }
+  ],
+  "segs": [
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "mention",
+      "text": "@Ana_M",
+      "href": null,
+      "id": "11111111-2222-4333-8444-555555555555"
+     },
+     {
+      "k": "text",
+      "text": " bold",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "@Ana_M bold"
+ },
+ {
+  "text": "multi\n*line\nbold*",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "multi\n*line\nbold*",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "multi\n*line\nbold*"
+ },
+ {
+  "text": "😀*emoji bold*😀 ~x~",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "😀",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "emoji bold",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": "😀 ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "strike",
+    "c": [
+     {
+      "k": "text",
+      "text": "x",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "😀emoji bold😀 x"
+ },
+ {
+  "text": "**double** __u__",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "*",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "double",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": "* _",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "italic",
+    "c": [
+     {
+      "k": "text",
+      "text": "u",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": "_",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "*double* _u_"
+ },
+ {
+  "text": "_ok_. (*paren*) \"~q~\"",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "italic",
+    "c": [
+     {
+      "k": "text",
+      "text": "ok",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": ". (",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "paren",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": ") \"",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "strike",
+    "c": [
+     {
+      "k": "text",
+      "text": "q",
+      "href": null,
+      "id": null
+     }
+    ]
+   },
+   {
+    "k": "text",
+    "text": "\"",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "ok. (paren) \"q\""
+ },
+ {
+  "text": "bad mention",
+  "mentions": [
+   {
+    "account_id": "11111111-2222-4333-8444-555555555555",
+    "start": 5,
+    "length": 40
+   }
+  ],
+  "segs": [
+   {
+    "k": "text",
+    "text": "bad mention",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "bad mention"
+ },
+ {
+  "text": "`@Bob` in code",
+  "mentions": [
+   {
+    "account_id": "11111111-2222-4333-8444-555555555555",
+    "start": 1,
+    "length": 4
+   }
+  ],
+  "segs": [
+   {
+    "k": "code",
+    "text": "@Bob",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "text",
+    "text": " in code",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "@Bob in code"
+ },
+ {
+  "text": "www.example.com/x_y_ *b*",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "link",
+    "text": "www.example.com/x_y_",
+    "href": "https://www.example.com/x_y_",
+    "id": null
+   },
+   {
+    "k": "text",
+    "text": " ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "text",
+      "text": "b",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "www.example.com/x_y_ b"
+ },
+ {
+  "text": "join: chatapp://join/AbCdEfGhIjKlMnOpQrStUv now _x_",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "join: ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "link",
+    "text": "chatapp://join/AbCdEfGhIjKlMnOpQrStUv",
+    "href": "chatapp://join/AbCdEfGhIjKlMnOpQrStUv",
+    "id": null
+   },
+   {
+    "k": "text",
+    "text": " now ",
+    "href": null,
+    "id": null
+   },
+   {
+    "k": "italic",
+    "c": [
+     {
+      "k": "text",
+      "text": "x",
+      "href": null,
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "join: chatapp://join/AbCdEfGhIjKlMnOpQrStUv now x"
+ },
+ {
+  "text": "chatapp://join/short_and_bad",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "text",
+    "text": "chatapp://join/short_and_bad",
+    "href": null,
+    "id": null
+   }
+  ],
+  "plain": "chatapp://join/short_and_bad"
+ },
+ {
+  "text": "*chatapp://join/Ab_d-fGhIjKlMnOpQrStUv*",
+  "mentions": [],
+  "segs": [
+   {
+    "k": "bold",
+    "c": [
+     {
+      "k": "link",
+      "text": "chatapp://join/Ab_d-fGhIjKlMnOpQrStUv",
+      "href": "chatapp://join/Ab_d-fGhIjKlMnOpQrStUv",
+      "id": null
+     }
+    ]
+   }
+  ],
+  "plain": "chatapp://join/Ab_d-fGhIjKlMnOpQrStUv"
+ }
+]

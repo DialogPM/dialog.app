@@ -1,0 +1,65 @@
+# cargo-deny configuration (https://embarkstudios.github.io/cargo-deny/), run in CI by the
+# "supply-chain" job of .github/workflows/ci.yml for the workspace and for server-rs:
+#
+#   cargo deny --locked check
+#   cargo deny --locked --manifest-path server-rs/Cargo.toml check --config deny.toml
+#
+# Dialog is AGPL-3.0-only, so every dependency must be under a license that can be combined
+# with it (permissive licenses, MPL-2.0, AGPL itself). docs/REPRODUCIBLE-BUILDS.md has the rest
+# of the supply-chain notes.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+# RustSec advisories are errors; unmaintained crates and yanked versions too.
+yanked = "deny"
+unmaintained = "workspace"
+# Add an entry only with a comment explaining why the advisory does not apply.
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    # webpki-roots (the Mozilla root certificate list as data).
+    "CDLA-Permissive-2.0",
+    # File-level copyleft, compatible with the (A)GPL (MPL-2.0 section 3.3).
+    "MPL-2.0",
+    # libsignal, zkgroup and our own crates.
+    "AGPL-3.0-only",
+]
+# Our own crates (chat-core, chatapp, chat_bridge, chatserver) are not published.
+private = { ignore = true }
+# allo-isolate (flutter_rust_bridge, mobile only) declares its license with a license file:
+# TODO: once `cargo deny check licenses` reports how it is detected, add a [[licenses.clarify]]
+# entry with the file's hash here instead of loosening the allow list.
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# libsignal (and its post-quantum ratchet) is only published as git tags.
+allow-git = [
+    "https://github.com/signalapp/libsignal",
+    "https://github.com/signalapp/SparsePostQuantumRatchet.git",
+]

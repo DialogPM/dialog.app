@@ -1,0 +1,45 @@
+[package]
+name = "chat-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+chat-core = { path = ".." }
+
+# Not a member of the main workspace (see README.md): an empty workspace of its own.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "content_decode"
+path = "fuzz_targets/content_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_inspect"
+path = "fuzz_targets/image_inspect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_process"
+path = "fuzz_targets/image_process.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "display_text"
+path = "fuzz_targets/display_text.rs"
+test = false
+doc = false
+bench = false

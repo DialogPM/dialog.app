@@ -1,0 +1,23 @@
+/target/
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+._*
+
+# Signing keys, service credentials and per-deployment Firebase configs never go into the
+# repository (mobile/README.md).
+*.p8
+*.p12
+*.pem
+*.key
+*.jks
+*.keystore
+*.mobileprovision
+*service-account*.json
+/secrets/
+mobile/android/key.properties
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+mobile/android/build/

@@ -1,0 +1,24 @@
+[package]
+name = "chat_bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Flutter bridge to the Dialog client core"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+chat-core = { path = "../../crates/chat-core" }
+anyhow = "1"
+serde_json = "1"
+hex = "0.4"
+log = "0.4"
+# Live voice effects and noise reduction of the call microphone (src/voice_fx.rs).
+voice-fx = { path = "../../crates/voice-fx" }
+# JNI entry points for Android (compiled everywhere, so they are checked on every build).
+jni-sys = "0.3"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
