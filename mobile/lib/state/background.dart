@@ -1,11 +1,13 @@
 // Battery: while the app is in the background and not in a call, the core closes its server
 // connection (whose ping every 25 s keeps the phone's radio awake) and pushes bring new messages
 // and calls (chat-core engine/net.rs set_background). During a call the connection stays open,
-// in the background too: the call's signaling goes through it.
+// in the background too: the call's signaling goes through it. Builds without push keep the
+// connection open as well (nothing else would bring new messages).
 
 import 'dart:async';
 
 import '../app/globals.dart';
+import '../services/push.dart';
 import 'calls.dart';
 import 'group_calls.dart';
 
@@ -31,7 +33,9 @@ void setAppHidden(bool hidden) {
 
 void _apply() {
   final inCall = callState.value != null || groupCallState.value != null;
-  final background = _hidden && !inCall;
+  // Without push (no Firebase configuration in this build, or Google services missing) nothing
+  // would wake the app for new messages: the connection then stays open in the background.
+  final background = _hidden && !inCall && Push.instance.available;
   if (background == _sent) return;
   _sent = background;
   try {
