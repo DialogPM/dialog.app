@@ -3,8 +3,9 @@ name: Android build
 # Release APK of the Flutter app (arm64 + armv7), signed with the release key from the
 # repository secrets ANDROID_KEYSTORE_BASE64, ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS and
 # ANDROID_KEY_PASSWORD. A version tag (v1.0.0, ...) publishes it as a GitHub release; a manual
-# run only keeps it as a workflow artifact. Built without a Firebase configuration: push
-# notifications are off, the app notifies while it runs (mobile/README.md).
+# run only keeps it as a workflow artifact. Push notifications need the Firebase configuration
+# of pm.dialog.chat in the secret GOOGLE_SERVICES_JSON; without it the app keeps its connection
+# open and notifies while it runs (mobile/README.md).
 
 on:
   workflow_dispatch:
@@ -62,6 +63,18 @@ jobs:
             echo "keyAlias=$KEY_ALIAS"
             echo "keyPassword=$KEY_PASSWORD"
           } > key.properties
+      # Push notifications: the Firebase configuration for pm.dialog.chat from the secret
+      # GOOGLE_SERVICES_JSON, if set; without it the app is built without push.
+      - name: Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > mobile/android/app/google-services.json
+            echo "Firebase configuration added: push enabled."
+          else
+            echo "No GOOGLE_SERVICES_JSON secret: built without push."
+          fi
       - name: Build
         working-directory: mobile
         run: |
@@ -71,7 +84,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk ../dist/Dialog-android.apk
       - name: Remove the signing key
         if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks" mobile/android/key.properties
+        run: rm -f "$RUNNER_TEMP/release.jks" mobile/android/key.properties mobile/android/app/google-services.json
       - uses: actions/upload-artifact@v4
         with:
           name: Dialog-android
