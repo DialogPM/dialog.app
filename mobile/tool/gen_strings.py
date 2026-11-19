@@ -10,7 +10,8 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LOCALES = os.path.join(ROOT, "..", "app", "src", "locales")
-LANGS = ["en", "ro", "it"]
+# The same list and order as kLanguages (lib/l10n/i18n.dart) and LANGUAGES (app/src/i18n.ts).
+LANGS = ["en", "ro", "it", "de", "es", "fr", "pt", "nl", "pl", "tr", "ru", "uk", "ar", "fa", "hi", "id", "vi", "zh", "ja", "ko"]
 
 
 def flatten(d, prefix=""):

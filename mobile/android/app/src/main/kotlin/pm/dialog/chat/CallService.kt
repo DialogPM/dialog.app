@@ -31,10 +31,13 @@ import android.util.Log
 class CallService : Service() {
     companion object {
         private const val TAG = "CallService"
-        private const val CHANNEL_ID = "ongoing_call"
+        internal const val CHANNEL_ID = "ongoing_call"
+        // Same notification, posted once on this high-importance (silent) channel by alert(), so
+        // it drops down as a banner when the user leaves the app during a call.
+        internal const val ALERT_CHANNEL_ID = "ongoing_call_alert"
         private const val NOTIFICATION_ID = 7301
         private const val ACTION_START = "pm.dialog.chat.call.START"
-        private const val ACTION_HANGUP = "pm.dialog.chat.call.HANGUP"
+        internal const val ACTION_HANGUP = "pm.dialog.chat.call.HANGUP"
 
         /** Set by MainActivity: the user tapped "Hang up" on the notification. */
         @Volatile
@@ -63,7 +66,27 @@ class CallService : Service() {
             }
         }
 
+        /** Extras of the call in progress (for alert()). */
+        @Volatile
+        private var current: Intent? = null
+
+        /**
+         * The user left the app during the call: the call notification drops down once as a
+         * banner over whatever is on screen (then stays as the status bar chip). Posted directly,
+         * not through the service: starting services from the background is not allowed.
+         */
+        fun alert(context: Context) {
+            val intent = current ?: return
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(NOTIFICATION_ID, buildNotification(context, intent, alert = true))
+            } catch (e: Exception) {
+                Log.w(TAG, "call notification alert: $e")
+            }
+        }
+
         fun stop(context: Context) {
+            current = null
             setProximity(context, false)
             try {
                 context.stopService(Intent(context, CallService::class.java))
@@ -114,7 +137,8 @@ class CallService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
-                val notification = buildNotification(intent)
+                current = Intent(intent)
+                val notification = buildNotification(this, intent, alert = false)
                 inForeground = goForeground(notification, intent.getBooleanExtra("video", false))
                 if (!inForeground) stopSelf()
             }
@@ -162,67 +186,77 @@ class CallService : Service() {
         return false
     }
 
-    private fun buildNotification(intent: Intent): Notification {
-        val title = intent.getStringExtra("title") ?: applicationInfo.loadLabel(packageManager).toString()
-        val text = intent.getStringExtra("text") ?: ""
-        val hangUp = intent.getStringExtra("hangUp") ?: "Hang up"
-        val channelName = intent.getStringExtra("channelName") ?: "Calls"
-        val immutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-
-        val open = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val openPending = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT or immutable)
-        val hangUpIntent = Intent(this, CallService::class.java).setAction(ACTION_HANGUP)
-        val hangUpPending = PendingIntent.getService(this, 1, hangUpIntent, PendingIntent.FLAG_UPDATE_CURRENT or immutable)
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                val channel = NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW).apply {
-                    setShowBadge(false)
-                    setSound(null, null)
-                    enableVibration(false)
-                    // Nothing about who is called on the lock screen.
-                    lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-                }
-                nm.createNotificationChannel(channel)
-            } else {
-                // Follows the app language.
-                nm.getNotificationChannel(CHANNEL_ID)?.let {
-                    if (it.name != channelName) {
-                        it.name = channelName
-                        nm.createNotificationChannel(it)
-                    }
-                }
-            }
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this).setPriority(Notification.PRIORITY_LOW)
-        }
-        builder
-            .setSmallIcon(applicationInfo.icon)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(openPending)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(true)
-            .setUsesChronometer(true)
-            .setCategory(Notification.CATEGORY_CALL)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-        }
-        @Suppress("DEPRECATION")
-        builder.addAction(Notification.Action.Builder(0, hangUp, hangUpPending).build())
-        return builder.build()
-    }
 
     override fun onDestroy() {
         inForeground = false
         setProximity(this, false)
         super.onDestroy()
     }
+}
+
+private fun buildNotification(context: Context, intent: Intent, alert: Boolean): Notification {
+    val title = intent.getStringExtra("title") ?: context.applicationInfo.loadLabel(context.packageManager).toString()
+    val text = intent.getStringExtra("text") ?: ""
+    val hangUp = intent.getStringExtra("hangUp") ?: "Hang up"
+    val channelName = intent.getStringExtra("channelName") ?: "Calls"
+    val immutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+
+    val open = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+    }
+    val openPending = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT or immutable)
+    val hangUpIntent = Intent(context, CallService::class.java).setAction(CallService.ACTION_HANGUP)
+    val hangUpPending = PendingIntent.getService(context, 1, hangUpIntent, PendingIntent.FLAG_UPDATE_CURRENT or immutable)
+
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = if (alert) CallService.ALERT_CHANNEL_ID else CallService.CHANNEL_ID
+        val importance = if (alert) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_LOW
+        if (nm.getNotificationChannel(channelId) == null) {
+            val channel = NotificationChannel(channelId, channelName, importance).apply {
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+                // Nothing about who is called on the lock screen.
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            }
+            nm.createNotificationChannel(channel)
+        } else {
+            // Follows the app language.
+            nm.getNotificationChannel(channelId)?.let {
+                if (it.name != channelName) {
+                    it.name = channelName
+                    nm.createNotificationChannel(it)
+                }
+            }
+        }
+        Notification.Builder(context, channelId)
+    } else {
+        @Suppress("DEPRECATION")
+        Notification.Builder(context).setPriority(Notification.PRIORITY_LOW)
+    }
+    builder
+        .setSmallIcon(context.applicationInfo.icon)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setContentIntent(openPending)
+        .setOngoing(true)
+        .setOnlyAlertOnce(!alert)
+        .setShowWhen(true)
+        .setUsesChronometer(true)
+        .setCategory(Notification.CATEGORY_CALL)
+        .setVisibility(Notification.VISIBILITY_PUBLIC)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Ongoing-call style: Android shows the call as a chip with its duration in the status
+        // bar (visible in any app) and puts its own hang-up button in the notification.
+        val person = android.app.Person.Builder().setName(title).setImportant(true).build()
+        builder.setStyle(Notification.CallStyle.forOngoingCall(person, hangUpPending))
+    } else {
+        @Suppress("DEPRECATION")
+        builder.addAction(Notification.Action.Builder(0, hangUp, hangUpPending).build())
+    }
+    return builder.build()
 }

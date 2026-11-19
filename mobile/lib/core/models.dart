@@ -73,7 +73,10 @@ class AppState {
   /// The local database is locked with the account password.
   final bool localProtected;
 
-  const AppState({required this.status, this.account, required this.defaultServerUrl, this.pendingMnemonic, this.localProtected = false});
+  /// "Remember the password on this phone" is on: the data opens at startup without it.
+  final bool autoUnlock;
+
+  const AppState({required this.status, this.account, required this.defaultServerUrl, this.pendingMnemonic, this.localProtected = false, this.autoUnlock = false});
 
   bool get ready => status == 'ready';
 
@@ -83,6 +86,7 @@ class AppState {
         defaultServerUrl: _str(j['default_server_url']) ?? '',
         pendingMnemonic: j['pending_mnemonic'] is List ? _strings(j['pending_mnemonic']) : null,
         localProtected: _bool(j['local_protected']),
+        autoUnlock: _bool(j['auto_unlock']),
       );
 }
 
@@ -890,10 +894,13 @@ class ProfileCard {
   /// Opened with its password since the app started: switching to it needs no password.
   final bool unlocked;
 
+  /// "Remember the password on this phone" is on: opens without a password.
+  final bool autoUnlock;
+
   /// The account in use now.
   final bool active;
 
-  const ProfileCard({required this.id, this.label, this.last4, this.serverHost, this.lastUsed = 0, this.unlocked = false, this.active = false});
+  const ProfileCard({required this.id, this.label, this.last4, this.serverHost, this.lastUsed = 0, this.unlocked = false, this.autoUnlock = false, this.active = false});
 
   factory ProfileCard.fromJson(Json j) => ProfileCard(
         id: _str(j['id']) ?? '',
@@ -902,6 +909,7 @@ class ProfileCard {
         serverHost: _str(j['server_host']),
         lastUsed: _int(j['last_used']),
         unlocked: j['unlocked'] == true,
+        autoUnlock: j['auto_unlock'] == true,
         active: j['active'] == true,
       );
 }

@@ -1,10 +1,12 @@
 // Full-screen call UI drawn above the whole app (port of app/src/features/calls/CallScreen.tsx):
 // incoming (accept / decline), outgoing, connecting, active. Video calls show the peer's video
-// full-screen and our camera picture-in-picture.
+// full-screen and our camera picture-in-picture; the peer's shared screen is shown whole, with
+// pinch-to-zoom (text on a computer screen is small on a phone).
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../l10n/i18n.dart';
@@ -27,25 +29,134 @@ class CallOverlay extends StatelessWidget {
   const CallOverlay({super.key, required this.child});
   final Widget child;
 
+  /// Height of the ongoing-call bar below the status bar.
+  static const barHeight = 52.0;
+
   @override
   Widget build(BuildContext context) {
     // While a call screen is shown nothing underneath may hold the focus: the keyboard of a
-    // chat composer would otherwise stay open over the answer / hang-up buttons.
-    return Stack(children: [
-      SizedBox.expand(child: ListenableBuilder(
-        listenable: Listenable.merge([callState, groupCallState]),
-        builder: (context, inner) => ExcludeFocus(excluding: callState.value != null || groupCallState.value != null, child: inner!),
-        child: child,
-      )),
-      ValueListenableBuilder<CallState?>(
-        valueListenable: callState,
-        builder: (context, call, _) => call == null ? const SizedBox.shrink() : Positioned.fill(child: _CallScreen(call: call)),
+    // chat composer would otherwise stay open over the answer / hang-up buttons. A minimized
+    // call leaves the app usable, pushed down below the ongoing-call bar (the same widgets
+    // either way, so the app keeps its state when the call is minimized or reopened).
+    return ListenableBuilder(
+      listenable: Listenable.merge([callState, groupCallState, callMinimized]),
+      child: child,
+      builder: (context, inner) {
+        final call = callState.value;
+        final mini = call != null && callMinimized.value && call.phase != CallPhase.incoming;
+        final full = call != null && !mini;
+        final mq = MediaQuery.of(context);
+        final top = mini ? mq.padding.top + barHeight : 0.0;
+        return Stack(children: [
+          Positioned.fill(
+            child: ExcludeFocus(
+              excluding: full || groupCallState.value != null,
+              child: Padding(
+                padding: EdgeInsets.only(top: top),
+                child: MediaQuery(data: mini ? mq.removePadding(removeTop: true) : mq, child: inner!),
+              ),
+            ),
+          ),
+          if (full) Positioned.fill(child: _CallScreen(call: call)),
+          if (mini) Positioned(top: 0, left: 0, right: 0, height: top, child: _OngoingCallBar(call: call)),
+          // Group calls (group_call_screen.dart).
+          const GroupCallLayer(),
+          // Voice effects panel of either call screen.
+          const VoiceFxPanelLayer(),
+        ]);
+      },
+    );
+  }
+}
+
+/// Bar on top of the app while a call is minimized (like WhatsApp's): who, how long, and
+/// mute / speaker / hang up. Tapping it reopens the call screen.
+class _OngoingCallBar extends StatefulWidget {
+  const _OngoingCallBar({required this.call});
+  final CallState call;
+
+  @override
+  State<_OngoingCallBar> createState() => _OngoingCallBarState();
+}
+
+class _OngoingCallBarState extends State<_OngoingCallBar> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final call = widget.call;
+    final status = call.phase == CallPhase.active && call.connectedAt != null
+        ? formatDuration(DateTime.now().millisecondsSinceEpoch - call.connectedAt!)
+        : context.t(call.phase == CallPhase.connecting ? 'call.connecting' : (call.ringing ? 'call.ringing' : 'call.calling'));
+    Widget icon(String name, VoidCallback onTap, {Color? bg, bool rotate = false, String? label}) => Semantics(
+          button: true,
+          label: label,
+          child: InkResponse(
+            onTap: onTap,
+            radius: 22,
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: bg ?? Colors.white.withValues(alpha: 0.14), shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: Transform.rotate(angle: rotate ? 2.36 : 0, child: AppIcon(name, size: 18, color: _fg)),
+            ),
+          ),
+        );
+    return Material(
+      color: Color.lerp(context.tk.accent, const Color(0xFF0B1210), 0.55),
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: CallOverlay.barHeight,
+          child: Row(children: [
+            Expanded(
+              child: InkWell(
+                onTap: () => callMinimized.value = false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(children: [
+                    AppIcon(call.video ? 'video' : 'phone', size: 18, color: _fg),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(call.peerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14.5, weight: 700, color: _fg)),
+                        Text('$status · ${context.t('mobile.call.tapToReturn')}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12, color: _fg.withValues(alpha: 0.8))),
+                      ]),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+            icon(call.muted ? 'micoff' : 'mic', toggleMute, bg: call.muted ? Colors.white.withValues(alpha: 0.32) : null,
+                label: context.t(call.muted ? 'call.unmute' : 'call.mute')),
+            const SizedBox(width: 8),
+            if (!call.video) ...[
+              icon('speaker', () => unawaited(toggleSpeaker()), bg: call.speaker ? Colors.white.withValues(alpha: 0.32) : null,
+                  label: context.t('mobile.call.speaker')),
+              const SizedBox(width: 8),
+            ],
+            icon('phone', () => unawaited(hangUp()), bg: _danger, rotate: true, label: context.t('call.end')),
+            const SizedBox(width: 12),
+          ]),
+        ),
       ),
-      // Group calls (group_call_screen.dart).
-      const GroupCallLayer(),
-      // Voice effects panel of either call screen.
-      const VoiceFxPanelLayer(),
-    ]);
+    );
   }
 }
 
@@ -59,6 +170,16 @@ class _CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<_CallScreen> {
   Timer? _ticker;
+  /// Full screen for the peer's video or screen: landscape, nothing else drawn.
+  bool _fullscreen = false;
+  /// Where the user dragged our camera's picture-in-picture (top-left corner); null = default.
+  Offset? _pip;
+
+  static const _pipSize = Size(112, 160);
+  static const _pipMargin = 16.0;
+  /// Clear of the header on top and the buttons at the bottom.
+  static const _pipTop = 110.0;
+  static const _pipBottom = 150.0;
 
   @override
   void initState() {
@@ -71,7 +192,55 @@ class _CallScreenState extends State<_CallScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    if (_fullscreen) unawaited(_applyFullscreen(false));
     super.dispose();
+  }
+
+  Future<void> _setFullscreen(bool on) async {
+    if (_fullscreen == on) return;
+    setState(() => _fullscreen = on);
+    await _applyFullscreen(on);
+  }
+
+  static Future<void> _applyFullscreen(bool on) async {
+    try {
+      // Landscape for a computer screen, whatever the phone's rotation lock says; back to
+      // the phone's own rotation afterwards.
+      await SystemChrome.setPreferredOrientations(on ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight] : const []);
+      await SystemChrome.setEnabledSystemUIMode(on ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge);
+    } catch (e) {
+      debugPrint('fullscreen: $e');
+    }
+  }
+
+  /// Our camera, draggable; dropped, it snaps to the nearest corner. Kept on screen when the
+  /// phone rotates.
+  Widget _pipView(BuildContext context, Widget child) {
+    final size = MediaQuery.sizeOf(context);
+    final pad = MediaQuery.paddingOf(context);
+    final left = _pipMargin;
+    final right = size.width - _pipMargin - _pipSize.width;
+    final top = pad.top + _pipTop;
+    final bottom = size.height - _pipBottom - _pipSize.height;
+    final raw = _pip ?? Offset(right, bottom);
+    final pos = Offset(raw.dx.clamp(left, right), raw.dy.clamp(top, bottom));
+    return Positioned(
+      left: pos.dx,
+      top: pos.dy,
+      width: _pipSize.width,
+      height: _pipSize.height,
+      child: GestureDetector(
+        onPanUpdate: (d) => setState(() => _pip = pos + d.delta),
+        onPanEnd: (_) => setState(() {
+          final c = pos + Offset(_pipSize.width / 2, _pipSize.height / 2);
+          _pip = Offset(c.dx < size.width / 2 ? left : right, c.dy < size.height / 2 ? top : bottom);
+        }),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: DecoratedBox(decoration: const BoxDecoration(color: Color(0xFF111111)), child: child),
+        ),
+      ),
+    );
   }
 
   String _status(BuildContext context) {
@@ -95,7 +264,10 @@ class _CallScreenState extends State<_CallScreen> {
     final accent = context.tk.accent;
     final incoming = call.phase == CallPhase.incoming;
     final videoMode = call.video && !incoming;
-    final remoteVideo = videoMode && call.remoteStream != null && call.remoteCameraOn && call.remoteStream!.getVideoTracks().isNotEmpty;
+    // The peer's video is its screen (shown whole) or its camera.
+    final screenMode = !incoming && call.remoteScreen;
+    final remoteVideo = videoMode && !screenMode && call.remoteStream != null && call.remoteCameraOn && call.remoteStream!.getVideoTracks().isNotEmpty;
+    final fullVideo = remoteVideo || screenMode;
 
     final header = Column(mainAxisSize: MainAxisSize.min, children: [
       Row(mainAxisSize: MainAxisSize.min, children: [
@@ -104,10 +276,14 @@ class _CallScreenState extends State<_CallScreen> {
         Text(context.t('call.encrypted'), style: ts(12, color: _fg.withValues(alpha: 0.7))),
       ]),
       const SizedBox(height: 10),
-      Text(call.peerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(remoteVideo ? 19 : 24, weight: 700, color: _fg)),
+      Text(call.peerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(fullVideo ? 19 : 24, weight: 700, color: _fg)),
       const SizedBox(height: 4),
       Text(_status(context), style: ts(14, color: _fg.withValues(alpha: 0.8), mono: call.phase == CallPhase.active)),
       _QualityNotice(call: call),
+      if (call.screenAsked) ...[
+        const SizedBox(height: 6),
+        Text(context.t('call.askedScreen', args: {'name': call.peerName}), style: ts(13, color: _fg.withValues(alpha: 0.75))),
+      ],
     ]);
 
     final avatar = Column(mainAxisSize: MainAxisSize.min, children: [
@@ -150,11 +326,48 @@ class _CallScreenState extends State<_CallScreen> {
             CallButton(icon: 'phone', rotate: true, label: context.t('call.end'), bg: _danger, onTap: () => unawaited(hangUp())),
           ];
 
+    if (_fullscreen && fullVideo) {
+      // Only the peer's screen (or camera) and a way out.
+      return Material(
+        color: Colors.black,
+        child: Stack(fit: StackFit.expand, children: [
+          InteractiveViewer(
+            minScale: 1,
+            maxScale: 5,
+            child: CallStreamView(stream: call.remoteStream!, version: call.streamVersion),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: IconButton(
+                  tooltip: context.t('mobile.call.exitFullscreen'),
+                  onPressed: () => unawaited(_setFullscreen(false)),
+                  icon: const AppIcon('fullscreenexit', size: 26, color: _fg),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+    }
+    // The video went away while in full screen: back to the normal layout (after this build).
+    if (_fullscreen) WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_setFullscreen(false)));
+
     return Material(
       color: Colors.black,
       child: Stack(fit: StackFit.expand, children: [
-        if (remoteVideo)
-          CallStreamView(stream: call.remoteStream!, cover: true)
+        if (screenMode)
+          // Pinch to zoom into the shared screen.
+          InteractiveViewer(
+            minScale: 1,
+            maxScale: 5,
+            child: CallStreamView(stream: call.remoteStream!, version: call.streamVersion),
+          )
+        else if (remoteVideo)
+          CallStreamView(stream: call.remoteStream!, cover: true, version: call.streamVersion)
         else
           DecoratedBox(
             decoration: BoxDecoration(
@@ -165,7 +378,7 @@ class _CallScreenState extends State<_CallScreen> {
               ),
             ),
           ),
-        if (!remoteVideo) Center(child: Padding(padding: const EdgeInsets.only(bottom: 60), child: avatar)),
+        if (!fullVideo) Center(child: Padding(padding: const EdgeInsets.only(bottom: 60), child: avatar)),
         // Top: name and status, over a scrim when video is shown.
         Positioned(
           top: 0,
@@ -173,7 +386,7 @@ class _CallScreenState extends State<_CallScreen> {
           right: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              gradient: remoteVideo
+              gradient: fullVideo
                   ? const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x99000000), Color(0x00000000)])
                   : null,
             ),
@@ -183,27 +396,73 @@ class _CallScreenState extends State<_CallScreen> {
             ),
           ),
         ),
-        if (videoMode && call.hasCamera && call.cameraOn && call.localStream != null)
+        if (!incoming)
           Positioned(
-            right: 16,
-            bottom: 150,
-            width: 112,
-            height: 160,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: DecoratedBox(
-                decoration: const BoxDecoration(color: Color(0xFF111111)),
-                child: CallStreamView(stream: call.localStream!, mirror: true, cover: true),
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: IconButton(
+                  tooltip: context.t('mobile.call.minimize'),
+                  onPressed: () => callMinimized.value = true,
+                  icon: Transform.rotate(angle: 1.5708, child: const AppIcon('chevron', size: 26, color: _fg)),
+                ),
               ),
             ),
           ),
+        // Top right: full screen (landscape) for the peer's video or screen, and ask the peer
+        // (a desktop) to share its screen.
+        if (!incoming)
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (fullVideo)
+                    IconButton(
+                      tooltip: context.t('mobile.call.fullscreen'),
+                      onPressed: () => unawaited(_setFullscreen(true)),
+                      icon: const AppIcon('fullscreen', size: 26, color: _fg),
+                    ),
+                  IconButton(
+                    tooltip: context.t('call.askScreen'),
+                    onPressed: call.screenAsked || call.remoteScreenOn || call.phase == CallPhase.outgoing ? null : askForScreen,
+                    icon: AppIcon('screen', size: 26, color: _fg.withValues(alpha: call.screenAsked || call.remoteScreenOn ? 0.45 : 1)),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        if (screenMode)
+          Positioned(
+            left: 16,
+            bottom: 150,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(999)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const AppIcon('screen', size: 14, color: _fg),
+                  const SizedBox(width: 6),
+                  Text(context.t('call.peerScreen', args: {'name': call.peerName}), style: ts(12.5, color: _fg)),
+                ]),
+              ),
+            ),
+          ),
+        if (videoMode && call.hasCamera && call.cameraOn && call.localStream != null)
+          _pipView(context, CallStreamView(stream: call.localStream!, mirror: true, cover: true)),
         Positioned(
           left: 0,
           right: 0,
           bottom: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              gradient: remoteVideo
+              gradient: fullVideo
                   ? const LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Color(0xAA000000), Color(0x00000000)])
                   : null,
             ),
@@ -259,10 +518,12 @@ class _QualityNotice extends StatelessWidget {
 }
 
 class CallStreamView extends StatefulWidget {
-  const CallStreamView({super.key, required this.stream, this.mirror = false, this.cover = false});
+  const CallStreamView({super.key, required this.stream, this.mirror = false, this.cover = false, this.version = 0});
   final MediaStream stream;
   final bool mirror;
   final bool cover;
+  /// Changes when a track was added to the same stream: the renderer binds it again.
+  final int version;
 
   @override
   State<CallStreamView> createState() => _CallStreamViewState();
@@ -291,7 +552,7 @@ class _CallStreamViewState extends State<CallStreamView> {
   @override
   void didUpdateWidget(CallStreamView old) {
     super.didUpdateWidget(old);
-    if (_ready && old.stream != widget.stream) _renderer.srcObject = widget.stream;
+    if (_ready && (old.stream != widget.stream || old.version != widget.version)) _renderer.srcObject = widget.stream;
   }
 
   @override

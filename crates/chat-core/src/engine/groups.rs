@@ -343,7 +343,9 @@ impl Inner {
             return Ok(());
         }
         self.db.borrow().kv_set_json(&key, &now)?;
-        self.insert_system_message(conv_id, "disappearing_changed", Some(actor.to_string()), vec![], Some(now.to_string()), Some(format!("grptimer-{id}")), now_ms())?;
+        // The control id is chosen by the sender: it names a row only when well-formed.
+        let row_id = crate::util::is_id(id).then(|| format!("grptimer-{id}"));
+        self.insert_system_message(conv_id, "disappearing_changed", Some(actor.to_string()), vec![], Some(now.to_string()), row_id, now_ms())?;
         self.expire_existing(conv_id, now)?;
         self.vault_put_conversation(conv_id);
         Ok(())
@@ -493,7 +495,8 @@ impl Inner {
             | GroupChange::KeyRotated
             | GroupChange::Snapshot => return Ok(()),
         };
-        self.insert_system_message(&conv, kind, actor, targets, value, Some(format!("grp-{}", ctrl.id)), now_ms())
+        let row_id = crate::util::is_id(&ctrl.id).then(|| format!("grp-{}", ctrl.id));
+        self.insert_system_message(&conv, kind, actor, targets, value, row_id, now_ms())
     }
 
     /// Sends a group control message to all attested members (and our other devices). Members

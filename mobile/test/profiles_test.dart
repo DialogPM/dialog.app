@@ -101,7 +101,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(calls.map((c) => c.$1), ['profile_open', 'profile_open', 'get_state']);
-      expect(calls[1].$2, {'id': 'p1', 'password': 'right one'});
+      expect(calls[1].$2, {'id': 'p1', 'password': 'right one', 'remember': false});
       expect(appData.appState?.status, 'no_account');
     });
 
@@ -121,7 +121,7 @@ void main() {
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(calls.single.$1, 'profile_open_by_number');
-      expect(calls.single.$2, {'number': '1234567812345678', 'password': 'secret'});
+      expect(calls.single.$2, {'number': '1234567812345678', 'password': 'secret', 'remember': false});
       expect(find.text('Wrong account number or password.'), findsOneWidget);
     });
   });

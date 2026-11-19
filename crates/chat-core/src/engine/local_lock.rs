@@ -10,6 +10,12 @@
 //!
 //! While locked, the engine runs on an empty in-memory database until [`Inner::unlock`].
 //! Changing the password only re-wraps the key, it never re-encrypts the database.
+//!
+//! Opt-in exception, per profile ("remember the password on this device"): the database key
+//! is also written in clear to `chat.db.auto`, so the profile opens at startup without the
+//! password ([`Inner::try_auto_unlock`]). Off by default; turning it on requires the password
+//! once, as proof; turning it off deletes the file. Anyone with the device's files can then
+//! read the data, which the UI says before enabling it (docs/SECURITY-REVIEW-CLIENT.md).
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -23,6 +29,8 @@ use crate::error::{Context, CoreError, ErrorCode, Result};
 
 pub const LOCK_FILE: &str = "chat.db.lock";
 const LOCK_TMP: &str = "chat.db.lock.tmp";
+/// The database key in clear, only while "remember the password on this device" is on.
+pub const AUTO_FILE: &str = "chat.db.auto";
 const LOCK_AAD: &[u8] = b"chatapp/local-db/v1";
 
 #[derive(Serialize, Deserialize)]
@@ -31,6 +39,14 @@ struct LockFile {
     kdf: KdfParams,
     /// The database key, sealed with the password-derived key.
     wrapped_key: String,
+}
+
+/// `chat.db.auto`: the database key itself (nothing derives it; deleting the file is enough to
+/// require the password again).
+#[derive(Serialize, Deserialize)]
+struct AutoFile {
+    v: u32,
+    key: String,
 }
 
 async fn derive(password: &str, kdf: &KdfParams) -> Result<[u8; 32]> {
@@ -56,6 +72,38 @@ pub fn finish_interrupted_lock(data_dir: &Path, device_key: &[u8; 32]) {
 
 pub fn is_locked_on_disk(data_dir: &Path) -> bool {
     data_dir.join(LOCK_FILE).exists()
+}
+
+/// Whether the profile in `data_dir` opens without its password (`chat.db.auto` present).
+pub fn has_auto_unlock(data_dir: &Path) -> bool {
+    data_dir.join(AUTO_FILE).exists()
+}
+
+/// The key saved by "remember the password on this device", if any (unreadable file: None).
+pub fn read_auto_key(data_dir: &Path) -> Option<[u8; 32]> {
+    let raw = std::fs::read(data_dir.join(AUTO_FILE)).ok()?;
+    let file: AutoFile = serde_json::from_slice(&raw).ok()?;
+    crypto::key32(&unb64(&file.key).ok()?).ok()
+}
+
+/// Writes `chat.db.auto` atomically, readable by the owner only where the OS has file modes.
+fn write_auto_file(data_dir: &Path, key: &[u8; 32]) -> Result<()> {
+    let path = data_dir.join(AUTO_FILE);
+    let part = path.with_extension("auto.part");
+    let file = AutoFile { v: 1, key: b64(key.to_vec()) };
+    std::fs::write(&part, serde_json::to_vec(&file)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&part, &path)?;
+    Ok(())
+}
+
+fn remove_auto_file(data_dir: &Path) {
+    let _ = std::fs::remove_file(data_dir.join(AUTO_FILE));
+    let _ = std::fs::remove_file(data_dir.join(AUTO_FILE).with_extension("auto.part"));
 }
 
 impl Inner {
@@ -135,6 +183,70 @@ impl Inner {
         (!self.locked.get() && self.local_protected()).then(|| self.db_key.get())
     }
 
+    /// "Remember the password on this device" is on for this profile.
+    pub fn auto_unlock_enabled(&self) -> bool {
+        has_auto_unlock(&self.data_dir)
+    }
+
+    /// Saves the database key in clear so this profile opens without its password. The caller
+    /// has just proven the password (unlock, or [`Inner::set_auto_unlock`]). Only for data
+    /// that is open and locked with the password on disk.
+    pub fn enable_auto_unlock(&self) -> Result<()> {
+        if self.locked.get() {
+            return Err(CoreError::invalid("the local data is locked"));
+        }
+        if !self.local_protected() {
+            return Err(CoreError::invalid("the local data is not protected with the password yet"));
+        }
+        write_auto_file(&self.data_dir, &self.db_key.get())
+    }
+
+    /// Back to the default: the password is required again at startup.
+    pub fn disable_auto_unlock(&self) {
+        remove_auto_file(&self.data_dir);
+    }
+
+    /// The setting as toggled from the UI: enabling needs the account password as proof.
+    pub async fn set_auto_unlock(&self, enabled: bool, password: Option<&str>) -> Result<()> {
+        if !enabled {
+            self.disable_auto_unlock();
+            return Ok(());
+        }
+        let Some(password) = password.filter(|p| !p.is_empty()) else {
+            return Err(CoreError::new(ErrorCode::InvalidPassword, "the password is required to turn this on"));
+        };
+        if !self.check_lock_password(password).await? {
+            return Err(CoreError::new(ErrorCode::InvalidPassword, "wrong password"));
+        }
+        self.enable_auto_unlock()
+    }
+
+    /// Whether `password` opens the local lock file (the password the data on this device is
+    /// locked with, which the unlock screen asks for).
+    async fn check_lock_password(&self, password: &str) -> Result<bool> {
+        let file = self.read_lock_file()?;
+        let kek = derive(password, &file.kdf).await?;
+        Ok(crypto::aead_open(&kek, &unb64(&file.wrapped_key)?, LOCK_AAD).is_ok())
+    }
+
+    /// Startup without the password: opens the database with the key from `chat.db.auto`.
+    /// Ok(false) when the option is off; a saved key that no longer opens the data is deleted
+    /// (the password is required again).
+    pub async fn try_auto_unlock(self: &Rc<Self>) -> Result<bool> {
+        if !self.locked.get() {
+            return Ok(true);
+        }
+        let Some(key) = read_auto_key(&self.data_dir) else { return Ok(false) };
+        match self.unlock_with_key(key).await {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                log::warn!("the saved key no longer opens this profile, asking for the password: {e}");
+                remove_auto_file(&self.data_dir);
+                Ok(false)
+            }
+        }
+    }
+
     /// Re-encrypts the database with a fresh random key and locks that key with `password`.
     /// The key in the OS keystore no longer opens anything afterwards.
     pub async fn lock_with_password(&self, password: &str) -> Result<()> {
@@ -143,6 +255,8 @@ impl Inner {
         }
         let key = crypto::random_bytes::<32>();
         let tmp = self.data_dir.join(LOCK_TMP);
+        // A key saved for "remember the password" would be the old one.
+        remove_auto_file(&self.data_dir);
         // Lock file first: if the app dies after the export/rekey, startup still finds the key.
         self.write_lock_file(password, &key, &tmp).await?;
         let db_path = self.data_dir.join("chat.db");
@@ -244,6 +358,7 @@ impl Inner {
         for f in [LOCK_FILE, LOCK_TMP] {
             let _ = std::fs::remove_file(self.data_dir.join(f));
         }
+        remove_auto_file(&self.data_dir);
         self.db_key.set(self.device_key);
         self.locked.set(false);
     }

@@ -47,6 +47,13 @@ void Function()? onSessionStarted;
 
 Future<void> bootstrap() async {
   try {
+    // An account with "remember the password on this phone" opens by itself at app start
+    // (once per run, never after "Switch account"). The app lock, if on, still applies.
+    try {
+      await backend.autoOpenProfiles();
+    } catch (e) {
+      debugPrint('auto open: $e');
+    }
     final s = await backend.getState();
     store.set((d) => d.copyWith(appState: s));
     if (s.ready) {

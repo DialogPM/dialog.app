@@ -19,6 +19,23 @@
 		<string>en</string>
 		<string>ro</string>
 		<string>it</string>
+		<string>de</string>
+		<string>es</string>
+		<string>fr</string>
+		<string>pt</string>
+		<string>nl</string>
+		<string>pl</string>
+		<string>tr</string>
+		<string>ru</string>
+		<string>uk</string>
+		<string>ar</string>
+		<string>fa</string>
+		<string>hi</string>
+		<string>id</string>
+		<string>vi</string>
+		<string>zh-Hans</string>
+		<string>ja</string>
+		<string>ko</string>
 	</array>
 	<key>CFBundleName</key>
 	<string>Dialog</string>

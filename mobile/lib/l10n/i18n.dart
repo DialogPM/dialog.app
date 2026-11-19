@@ -12,11 +12,30 @@ import 'strings.g.dart';
 
 export '../brand.g.dart';
 
-/// Supported languages, in the order shown in Settings → Language.
+/// Supported languages, in the order shown in Settings → Language (the same list and order as
+/// the desktop app: app/src/i18n.ts). Adding one: tool/gen_strings.py (LANGS),
+/// tool/mobile_strings.json and ios/Runner/<code>.lproj.
 const List<({String code, String label})> kLanguages = [
   (code: 'en', label: 'English'),
   (code: 'ro', label: 'Română'),
   (code: 'it', label: 'Italiano'),
+  (code: 'de', label: 'Deutsch'),
+  (code: 'es', label: 'Español'),
+  (code: 'fr', label: 'Français'),
+  (code: 'pt', label: 'Português'),
+  (code: 'nl', label: 'Nederlands'),
+  (code: 'pl', label: 'Polski'),
+  (code: 'tr', label: 'Türkçe'),
+  (code: 'ru', label: 'Русский'),
+  (code: 'uk', label: 'Українська'),
+  (code: 'ar', label: 'العربية'),
+  (code: 'fa', label: 'فارسی'),
+  (code: 'hi', label: 'हिन्दी'),
+  (code: 'id', label: 'Bahasa Indonesia'),
+  (code: 'vi', label: 'Tiếng Việt'),
+  (code: 'zh', label: '简体中文'),
+  (code: 'ja', label: '日本語'),
+  (code: 'ko', label: '한국어'),
 ];
 
 /// Language of the system if supported, otherwise English.
@@ -31,15 +50,45 @@ String systemLanguage() {
 /// Current language (also used outside of widgets, e.g. for notifications).
 String currentLanguage = 'en';
 
-/// CLDR plural category for integers in [lang].
+/// CLDR plural category for the integer [n] in [lang] (the suffix of the string to use:
+/// "_one", "_few"...). Languages without plural forms (Chinese, Japanese...) only have "other".
 String pluralCategory(String lang, int n) {
-  if (lang == 'ro') {
-    if (n == 1) return 'one';
-    final m = n % 100;
-    if (n == 0 || (m >= 1 && m <= 19)) return 'few';
-    return 'other';
+  final m10 = n % 10, m100 = n % 100;
+  switch (lang) {
+    case 'ro':
+      if (n == 1) return 'one';
+      if (n == 0 || (m100 >= 1 && m100 <= 19)) return 'few';
+      return 'other';
+    case 'ru':
+    case 'uk':
+      if (m10 == 1 && m100 != 11) return 'one';
+      if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'few';
+      return 'many';
+    case 'pl':
+      if (n == 1) return 'one';
+      if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'few';
+      return 'many';
+    case 'ar':
+      if (n == 0) return 'zero';
+      if (n == 1) return 'one';
+      if (n == 2) return 'two';
+      if (m100 >= 3 && m100 <= 10) return 'few';
+      if (m100 >= 11) return 'many';
+      return 'other';
+    case 'fr':
+    case 'pt':
+    case 'hi':
+    case 'fa':
+      return n == 0 || n == 1 ? 'one' : 'other';
+    case 'id':
+    case 'ja':
+    case 'ko':
+    case 'vi':
+    case 'zh':
+      return 'other';
+    default:
+      return n == 1 ? 'one' : 'other';
   }
-  return n == 1 ? 'one' : 'other';
 }
 
 /// Translates [key] in [lang]. [args] fill "{{name}}" placeholders; [count] selects the plural

@@ -461,6 +461,7 @@ impl Inner {
             Content::Call(c) if c.kind == "offer" && !is_self && !online => Some(c.call_id.clone()),
             _ => None,
         };
+        let no_push = call_signal_without_push(content);
         let mut fetched_all = false;
         // Sealed sender when we know the contact's access key (never for our own devices).
         let mut sealed = match (is_self, self.peer_access_key(account_id)) {
@@ -490,7 +491,7 @@ impl Inner {
                 Some((_, cert)) => self.seal_for(account_id, &devices, &plaintext, cert).await?,
                 None => self.encrypt_for(account_id, &devices, &plaintext).await?,
             };
-            let req = SendReq { timestamp: content_timestamp(content), online, messages, call_id: call_push.clone() };
+            let req = SendReq { timestamp: content_timestamp(content), online, messages, call_id: call_push.clone(), no_push };
             let sent = match &sealed {
                 Some((key, _)) => s.api.put_sealed_messages(account_id, key, &req).await,
                 None => s.api.put_messages(account_id, &req).await,
@@ -728,6 +729,19 @@ impl Inner {
     }
 }
 
+/// Call signalling the server must not announce with a push: what follows an offer while both
+/// sides are in the call (ICE candidates, answers, media state...). On a phone that is still
+/// waking up for the offer's call push, each of them would otherwise show "New message".
+/// Offers ring through their own call push, and a hangup still wakes the callee (a call that
+/// rang must stop, and a missed call is worth a notification); group "join" rings too.
+fn call_signal_without_push(content: &Content) -> bool {
+    const QUIET: &[&str] = &["answer", "ice", "ringing", "busy", "media", "reoffer", "renegotiate", "screen"];
+    match content {
+        Content::Call(c) => QUIET.contains(&c.kind.strip_prefix("group_").unwrap_or(&c.kind)),
+        _ => false,
+    }
+}
+
 /// Envelope timestamp: for data messages it equals `sent_at`, so that a recipient that fails to
 /// decrypt can ask for exactly that message again (see `ResendRequest`).
 fn content_timestamp(content: &Content) -> i64 {
@@ -735,5 +749,40 @@ fn content_timestamp(content: &Content) -> i64 {
         Content::Data(d) => d.sent_at,
         Content::Sync(SyncMessage::Sent { message, .. }) => message.sent_at,
         _ => now_ms(),
+    }
+}
+
+#[cfg(test)]
+mod no_push_tests {
+    use super::*;
+    use crate::content::CallSignal;
+
+    fn call(kind: &str, group: bool) -> Content {
+        Content::Call(CallSignal {
+            call_id: "c-1".into(),
+            kind: kind.into(),
+            data: serde_json::Value::Null,
+            target_device: None,
+            group_id: group.then(|| "g".to_string()),
+        })
+    }
+
+    #[test]
+    fn only_in_call_signalling_is_sent_without_a_push() {
+        for kind in ["ice", "answer", "ringing", "busy", "media", "reoffer", "renegotiate", "screen"] {
+            assert!(call_signal_without_push(&call(kind, false)), "{kind}");
+        }
+        for kind in ["group_ice", "group_answer", "group_media"] {
+            assert!(call_signal_without_push(&call(kind, true)), "{kind}");
+        }
+        // These ring, stop a ringing phone or announce a missed call.
+        for kind in ["offer", "hangup", "group_join", "group_offer", "group_hangup"] {
+            assert!(!call_signal_without_push(&call(kind, kind.starts_with("group_"))), "{kind}");
+        }
+        assert!(!call_signal_without_push(&Content::Typing { typing: true, group_id: None }));
+        // The flag is absent from the request unless set (older servers ignore it anyway).
+        let req = |no_push| SendReq { timestamp: 1, online: false, messages: Vec::new(), call_id: None, no_push };
+        assert!(!serde_json::to_string(&req(false)).unwrap().contains("no_push"));
+        assert!(serde_json::to_string(&req(true)).unwrap().contains("\"no_push\":true"));
     }
 }

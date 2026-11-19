@@ -63,6 +63,13 @@ pub struct PasswordReq {
     password: String,
 }
 #[derive(Deserialize)]
+pub struct AutoUnlockReq {
+    enabled: bool,
+    /// Required to turn it on (proof), ignored when turning it off.
+    #[serde(default)]
+    password: Option<String>,
+}
+#[derive(Deserialize)]
 pub struct ReminderReq {
     name: String,
 }
@@ -366,6 +373,7 @@ rpc_table! {
     read_media(req: PathReq) -> String => |i| i.read_media_base64(&req.path).await;
     export_media(req: ExportMediaReq) -> () => |i| i.export_media_file(std::path::Path::new(&req.path), std::path::Path::new(&req.dest)).await;
     protect_local_data(req: PasswordReq) -> () => |i| i.protect_local_data(&req.password).await;
+    set_auto_unlock(req: AutoUnlockReq) -> () => |i| i.set_auto_unlock(req.enabled, req.password.as_deref()).await;
     reset_local_data(req: Option<PasswordReq>) -> () => |i| i.reset_local_data_checked(req.as_ref().map(|r| r.password.as_str())).await;
     get_account_details() -> AccountDetails => |i| i.account_details().await;
     change_password(req: ChangePasswordReq) -> () => |i| i.change_password(&req.old_password, &req.new_password).await;

@@ -15,6 +15,7 @@ import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
 import '../../widgets/ui.dart';
 import '../settings/logout.dart';
+import 'remember_password.dart';
 
 class DataLockScreen extends StatefulWidget {
   const DataLockScreen({super.key, required this.protect});
@@ -28,6 +29,7 @@ class DataLockScreen extends StatefulWidget {
 class _DataLockScreenState extends State<DataLockScreen> {
   final _password = TextEditingController();
   final _focus = FocusNode();
+  bool _remember = false;
   bool _busy = false;
   String? _error;
 
@@ -51,6 +53,14 @@ class _DataLockScreenState extends State<DataLockScreen> {
         await backend.protectLocalData(_password.text);
       } else {
         await backend.unlock(_password.text);
+      }
+      // "Remember the password on this phone": the password just entered is the proof.
+      if (_remember) {
+        try {
+          await backend.setAutoUnlock(enabled: true, password: _password.text);
+        } catch (e) {
+          debugPrint('auto unlock: $e');
+        }
       }
       final s = await backend.getState();
       // The password was just entered: the app lock must not ask for it again now.
@@ -119,7 +129,9 @@ class _DataLockScreenState extends State<DataLockScreen> {
                       onChanged: (_) => setState(() {}),
                       onSubmitted: (_) => _submit(),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 12),
+                    RememberPasswordCheck(on: _remember, onChanged: (v) => setState(() => _remember = v)),
+                    const SizedBox(height: 12),
                     Btn(
                       label: context.t(widget.protect ? 'dataLock.protect' : 'lock.unlock'),
                       busy: _busy,

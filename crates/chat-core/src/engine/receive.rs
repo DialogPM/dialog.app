@@ -26,6 +26,9 @@ pub(super) const AUTO_DOWNLOAD_MAX: i64 = 16 * 1024 * 1024;
 const DELETE_WINDOW_MS: i64 = 2 * 24 * 3600 * 1000 + 3600 * 1000;
 /// Edits are accepted for messages up to this age.
 const EDIT_WINDOW_MS: i64 = 24 * 3600 * 1000;
+/// Resend requests per sending device within `RESEND_WINDOW_MS` (see `request_resend`).
+const RESEND_REQUESTS_PER_WINDOW: usize = 3;
+const RESEND_WINDOW_MS: i64 = 3600 * 1000;
 
 impl Inner {
     pub(super) async fn handle_envelope(self: Rc<Self>, mut env: Envelope) -> Result<()> {
@@ -41,6 +44,12 @@ impl Inner {
                     return Ok(());
                 }
             }
+        }
+        // The source (from the envelope, or the sealed sender certificate) becomes a contact
+        // id, a conversation peer and a path segment: only well-formed account ids go further.
+        if !crate::util::is_id(&env.source_account) {
+            log::warn!("dropping envelope {}: malformed source account id", env.id);
+            return Ok(());
         }
         if env.source_account != me && self.is_blocked(&env.source_account) {
             return Ok(());
@@ -218,17 +227,26 @@ impl Inner {
         Ok(())
     }
 
-    /// Asks the sender to resend a message we failed to decrypt (at most once per envelope).
+    /// Asks the sender to resend a message we failed to decrypt: at most once per envelope and
+    /// `RESEND_REQUESTS_PER_WINDOW` per sending device and hour. Our session with that device
+    /// is kept: the sender starts a fresh one when it answers (`handle_resend_request`), so an
+    /// envelope the server forges in someone's name cannot reset our sessions at will, make us
+    /// consume that account's pre-keys, or grow the database by one row per envelope.
     fn request_resend(&self, env: &Envelope) -> Result<()> {
-        let key = format!("resend:{}:{}:{}", env.source_account, env.source_device, env.timestamp);
-        if self.db.borrow().kv_get(&key)?.is_some() {
+        let now = crate::util::now_ms();
+        let key = format!("resend_requests:{}:{}", env.source_account, env.source_device);
+        // (asked at, envelope timestamp) of the requests of the last hour.
+        let mut recent: Vec<(i64, i64)> = self.db.borrow().kv_get_json(&key)?.unwrap_or_default();
+        recent.retain(|(at, _)| now.saturating_sub(*at) < RESEND_WINDOW_MS);
+        if recent.iter().any(|(_, ts)| *ts == env.timestamp) {
             return Ok(());
         }
-        self.db.borrow().kv_set(&key, b"1")?;
-        if env.kind != 7 {
-            // The pairwise session is broken: start a fresh one on our side.
-            self.delete_session(&env.source_account, env.source_device)?;
+        if recent.len() >= RESEND_REQUESTS_PER_WINDOW {
+            log::warn!("not asking {} for another resend: limit reached", env.source_account);
+            return Ok(());
         }
+        recent.push((now, env.timestamp));
+        self.db.borrow().kv_set_json(&key, &recent)?;
         let content = Content::ResendRequest { timestamp: env.timestamp, group_id: env.group_id.clone() };
         self.enqueue(&Job::Account { account_id: env.source_account.clone(), content })
     }
@@ -275,7 +293,13 @@ impl Inner {
                 dm.group_id = Some(g);
                 self.enqueue(&Job::Account { account_id: requester.to_string(), content: Content::Data(dm) })?;
             }
-            None => self.enqueue(&Job::Message { message_id: id })?,
+            None => {
+                // The requester could not read our last message: its copy of the session is
+                // gone or out of step. Start a fresh one (the resend goes out as a PreKey
+                // message), instead of the requester dropping its own session blindly.
+                self.delete_session(requester, device)?;
+                self.enqueue(&Job::Message { message_id: id })?;
+            }
         }
         Ok(())
     }
@@ -442,7 +466,7 @@ impl Inner {
         }
         if let Some(edit) = &dm.edit {
             if let Some((author, sent_at)) = self.message_author(&edit.target_id, conv_id)? {
-                if author == sender && dm.sent_at - sent_at <= EDIT_WINDOW_MS {
+                if author == sender && dm.sent_at.saturating_sub(sent_at) <= EDIT_WINDOW_MS {
                     let mentions = super::messages::sanitize_mentions(Some(&edit.body), &edit.mentions);
                     let mentions_json = (!mentions.is_empty()).then(|| serde_json::to_string(&mentions)).transpose()?;
                     // Keeps the previous text; past MAX_EDITS edits the message stays as is.
@@ -459,7 +483,7 @@ impl Inner {
         if let Some(target) = &dm.delete {
             if let Some((author, sent_at)) = self.message_author(target, conv_id)? {
                 let is_admin_delete = false;
-                if (author == sender || is_admin_delete) && dm.sent_at - sent_at <= DELETE_WINDOW_MS {
+                if (author == sender || is_admin_delete) && dm.sent_at.saturating_sub(sent_at) <= DELETE_WINDOW_MS {
                     self.mark_deleted_for_everyone(target)?;
                     self.emit_message(target, false);
                     self.emit_conversation(conv_id);

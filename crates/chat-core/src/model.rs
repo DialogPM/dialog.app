@@ -31,6 +31,9 @@ pub struct AppState {
     /// The local database is locked with the account password (always true once set up;
     /// false right after linking a device or for data from older versions).
     pub local_protected: bool,
+    /// "Remember the password on this device" is on: the data opens at startup without it
+    /// (engine/local_lock.rs, opt-in per profile).
+    pub auto_unlock: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

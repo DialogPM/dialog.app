@@ -16,6 +16,9 @@ use crate::content::{Content, SyncMessage};
 use crate::crypto::{self, b64, unb64};
 use crate::error::Result;
 use crate::model::*;
+
+/// Pages of 500 records one pull applies before yielding to the next sync.
+const MAX_VAULT_PAGES_PER_PULL: usize = 200;
 use crate::util::now_ms;
 
 const VAULT_AAD: &[u8] = b"chatapp-vault-v1";
@@ -347,7 +350,13 @@ impl Inner {
         let s = self.session()?;
         let restoring: bool = self.db.borrow().kv_get_json("restore_pending")?.unwrap_or(false);
         let mut applied = 0usize;
-        loop {
+        // A server answering `more: true` forever must not keep this loop (and the device)
+        // busy: the rest is pulled by the next sync.
+        for page_no in 0.. {
+            if page_no >= MAX_VAULT_PAGES_PER_PULL {
+                log::warn!("vault: stopping after {page_no} pages; continuing at the next sync");
+                break;
+            }
             let since: i64 = self.db.borrow().kv_get_json("vault_seq")?.unwrap_or(0);
             let page: VaultPageDto = s.api.get(&format!("/v1/vault/records?since={since}&limit=500")).await?;
             let mut max_seq = since;
@@ -521,6 +530,17 @@ impl Inner {
                 } else {
                     // Media past the retention limit is stored erased by `insert_message`.
                     let attachments = m.attachments.iter().filter_map(restored_attachment).collect();
+                    // A call entry backed up before calls disappeared with their chat: in a chat
+                    // with a timer it gets the deadline it would have had (and goes at once if
+                    // that is past), instead of staying forever on the restored device.
+                    let call_timer = m
+                        .system
+                        .as_ref()
+                        .filter(|s| s.kind == "call")
+                        .and_then(|_| self.conversation_row(&conv).ok())
+                        .map(|c| c.disappearing_seconds)
+                        .filter(|t| *t > 0)
+                        .unwrap_or(0);
                     self.insert_message(NewMessage {
                         id: m.id.clone(),
                         conversation_id: conv.clone(),
@@ -537,8 +557,8 @@ impl Inner {
                         status: m.status.clone(),
                         sent_at: m.sent_at,
                         received_at: m.received_at,
-                        expires_in: 0,
-                        expires_at: None,
+                        expires_in: call_timer,
+                        expires_at: (call_timer > 0).then(|| m.sent_at.saturating_add(call_timer.saturating_mul(1000))),
                         system: m.system.clone(),
                     })?;
                     let db = self.db.borrow();

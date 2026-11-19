@@ -423,6 +423,22 @@ async fn full_flow() {
     let req = signal(&b_acc.account_id, "answer", serde_json::json!({ "sdp": restart_answer }), Some(bob_device), false);
     alice.core.run(move |i| async move { i.call_signal(req).await }).await.unwrap();
     bob.wait_event("restart answer", |n, v| call_kind("answer")(n, v) && v["data"]["sdp"] == restart_answer.as_str()).await;
+    // Renegotiation (a screen shared in a voice call) and the screen request: targeted, from
+    // either side; the description is checked like an offer's.
+    let req = signal(&b_acc.account_id, "renegotiate", serde_json::json!({ "sdp": offer_sdp }), None, false);
+    assert!(alice.core.run(move |i| async move { i.call_signal(req).await }).await.is_err(), "untargeted renegotiation refused");
+    let req = signal(&b_acc.account_id, "renegotiate", serde_json::json!({ "sdp": bad }), Some(bob_device), false);
+    alice.core.run(move |i| async move { i.call_signal(req).await }).await.unwrap();
+    let req = signal(&b_acc.account_id, "renegotiate", serde_json::json!({ "sdp": offer_sdp }), Some(bob_device), false);
+    alice.core.run(move |i| async move { i.call_signal(req).await }).await.unwrap();
+    let renegotiate = bob.wait_event("renegotiation", call_kind("renegotiate")).await;
+    assert_eq!(renegotiate["data"]["sdp"], offer_sdp.as_str());
+    let renegotiations = bob.events.0.lock().unwrap().iter().filter(|(n, v)| call_kind("renegotiate")(n, v)).count();
+    assert_eq!(renegotiations, 1, "the invalid renegotiation must be dropped");
+    let req = signal(&a_acc.account_id, "screen", serde_json::json!({ "request": true }), Some(a_acc.device_id), false);
+    bob.core.run(move |i| async move { i.call_signal(req).await }).await.unwrap();
+    let request = alice.wait_event("screen request", call_kind("screen")).await;
+    assert_eq!(request["data"]["request"], true);
     // History entry, once.
     for _ in 0..2 {
         let rec: chat_core::engine::RecordCallRequest = serde_json::from_value(serde_json::json!({

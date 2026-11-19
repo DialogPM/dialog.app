@@ -54,6 +54,9 @@ class OngoingCall {
 
   static Future<void> stop() => _invoke('stop');
 
+  /// The user left the app during the call: the call notification drops down once as a banner.
+  static Future<void> alert() => _invoke('alert');
+
   /// Screen off when the phone is at the ear (voice call on the earpiece).
   static Future<void> setProximity(bool on) => _invoke('setProximity', on);
 }

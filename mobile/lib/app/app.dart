@@ -18,7 +18,9 @@ import '../l10n/i18n.dart';
 import '../services/media.dart';
 import '../services/security.dart';
 import '../state/actions.dart';
+import '../services/ongoing_call.dart';
 import '../state/background.dart';
+import '../state/calls.dart' show CallPhase, callState;
 import '../state/events.dart';
 import '../state/prefs.dart';
 import '../state/store.dart';
@@ -27,6 +29,7 @@ import '../theme/tokens.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/ui.dart';
 import 'globals.dart';
+import 'nav.dart';
 
 class ChatApp extends ConsumerStatefulWidget {
   const ChatApp({super.key, this.startError});
@@ -51,6 +54,9 @@ class _ChatAppState extends ConsumerState<ChatApp> with WidgetsBindingObserver {
         appInForeground = false;
         onAppHidden();
         setAppHidden(true);
+        // Left the app during a call: the call notification drops down once as a banner.
+        final call = callState.value;
+        if (call != null && call.phase != CallPhase.incoming) unawaited(OngoingCall.alert());
       },
       onShow: () {
         appInForeground = true;
@@ -105,7 +111,7 @@ class _ChatAppState extends ConsumerState<ChatApp> with WidgetsBindingObserver {
       scaffoldMessengerKey: messengerKey,
       theme: buildTheme(tokens),
       locale: Locale(lang),
-      supportedLocales: const [Locale('en'), Locale('ro'), Locale('it')],
+      supportedLocales: [for (final l in kLanguages) Locale(l.code)],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       builder: (context, child) {
         // Font size setting (Appearance), on top of the system text scale.
@@ -145,7 +151,7 @@ class _RootState extends ConsumerState<_Root> {
     if (nav == null) return;
     if (locked && _lockRoute == null) {
       final route = PageRouteBuilder<void>(
-        settings: const RouteSettings(name: 'lock'),
+        settings: const RouteSettings(name: lockRouteName),
         pageBuilder: (_, _, _) => const LockScreen(),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: const Duration(milliseconds: 150),
@@ -156,6 +162,8 @@ class _RootState extends ConsumerState<_Root> {
       final route = _lockRoute!;
       _lockRoute = null;
       if (route.isActive) nav.removeRoute(route);
+      // A notification tapped while locked opens its conversation now.
+      openPendingChat();
     }
   }
 

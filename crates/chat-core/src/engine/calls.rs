@@ -37,7 +37,14 @@ const SIGNAL_MAX_AGE_MS: i64 = 120_000;
 /// dropped, e.g. a network change); answered with a plain "answer". Unlike "offer" it never
 /// rings, never counts as a new call and is never turned into a missed call: the UI applies it
 /// only to the call it is in, and only from the device it talks to.
-const KINDS: &[&str] = &["offer", "answer", "ice", "ringing", "hangup", "busy", "media", "reoffer"];
+/// "renegotiate": like "reoffer" but from either side, without an ICE restart: a new offer when
+/// the media of a call in progress changes (a screen shared in a voice call adds its video
+/// section); answered with a plain "answer".
+/// "screen": screen sharing between the two devices of a call: `{"request": true}` asks the
+/// peer to share its screen, `{"declined": true}` (optionally with `"unsupported": true`, from a
+/// device that cannot share) answers no. Whether a screen is being sent travels in "media"
+/// (`{"screen": bool}`), like the camera.
+const KINDS: &[&str] = &["offer", "answer", "ice", "ringing", "hangup", "busy", "media", "reoffer", "renegotiate", "screen"];
 /// "unavailable": the callee does not accept calls (hangup reason `calls_disabled`).
 const STATUSES: &[&str] = &["answered", "missed", "declined", "busy", "failed", "cancelled", "unavailable"];
 /// New calls (distinct call ids) accepted per stranger (conversation not accepted) in
@@ -114,7 +121,7 @@ impl Inner {
         let mut data = req.data;
         if !req.to_own_devices && self.relay_only() {
             match req.kind.as_str() {
-                "offer" | "answer" | "reoffer" => data = call_checks::relay_only_sdp_signal(&data),
+                "offer" | "answer" | "reoffer" | "renegotiate" => data = call_checks::relay_only_sdp_signal(&data),
                 "ice" => match call_checks::relay_only_ice_signal(&data) {
                     Some(d) => data = d,
                     None => return Ok(()),
@@ -122,8 +129,8 @@ impl Inner {
                 _ => {}
             }
         }
-        // A restart is for the device of the call in progress, never a broadcast.
-        if req.kind == "reoffer" && (req.to_own_devices || req.target_device.is_none()) {
+        // A restart or a renegotiation is for the device of the call in progress, never a broadcast.
+        if (req.kind == "reoffer" || req.kind == "renegotiate") && (req.to_own_devices || req.target_device.is_none()) {
             return Err(CoreError::invalid("a call restart needs its target device"));
         }
         let signal = CallSignal { call_id: req.call_id, kind: req.kind, data, target_device: req.target_device, group_id: None };
@@ -142,9 +149,9 @@ impl Inner {
         }
         // Remote SDP and ICE go straight into WebRTC: only what our clients produce passes.
         match s.kind.as_str() {
-            "offer" | "answer" | "reoffer" if !call_checks::valid_sdp_signal(&s.data) => return Ok(()),
-            // A restart names the device of the call in progress.
-            "reoffer" if s.target_device.is_none() => return Ok(()),
+            "offer" | "answer" | "reoffer" | "renegotiate" if !call_checks::valid_sdp_signal(&s.data) => return Ok(()),
+            // A restart or a renegotiation names the device of the call in progress.
+            "reoffer" | "renegotiate" if s.target_device.is_none() => return Ok(()),
             "ice" => match call_checks::clean_ice_signal(&s.data) {
                 Some(data) => s.data = data,
                 None => return Ok(()),
@@ -263,15 +270,72 @@ impl Inner {
         )
     }
 
-    /// Call history entry in the conversation (one per call; later records are ignored).
+    /// Call history entry in the conversation (one per call; later records are ignored). In a
+    /// chat with disappearing messages it disappears too, the chat's timer after it was
+    /// recorded: a call is part of the conversation like a message.
     fn record_call_message(&self, conv: &str, call_id: &str, caller: &str, status: &str, duration_ms: i64, at: i64) -> Result<()> {
         let value = json!({ "status": status, "duration_ms": duration_ms }).to_string();
-        self.insert_system_message(conv, "call", Some(caller.to_string()), vec![], Some(value), Some(format!("call-{call_id}")), at)
+        let timer = self.conversation_row(conv).map(|c| c.disappearing_seconds).unwrap_or(0);
+        self.insert_system_message_expiring(conv, "call", Some(caller.to_string()), vec![], Some(value), Some(format!("call-{call_id}")), at, timer)
     }
 
     /// ICE servers (STUN/TURN with short-lived credentials) from our server.
     pub async fn get_ice_servers(&self) -> Result<Value> {
         let s = self.session()?;
         s.api.get::<Value>("/v1/calls/ice").await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{Core, CoreConfig, EventSink};
+    use std::sync::Arc;
+
+    struct NoEvents;
+    impl EventSink for NoEvents {
+        fn emit(&self, _: &str, _: Value) {}
+    }
+
+    /// A call entry in a chat with disappearing messages gets the chat's deadline; in a chat
+    /// without a timer it stays.
+    #[tokio::test]
+    async fn call_entries_disappear_with_the_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::start(CoreConfig {
+            data_dir: dir.path().to_path_buf(),
+            db_key: [5u8; 32],
+            default_server_url: String::new(),
+            platform: "test".into(),
+            events: Arc::new(NoEvents),
+        })
+        .unwrap();
+        core.run(|i| async move {
+            i.db.borrow().conn.execute_batch(
+                "INSERT INTO conversations (id, kind, created_at, updated_at, disappearing_seconds) VALUES
+                    ('timed', 'direct', 0, 0, 21600), ('plain', 'direct', 0, 0, 0);",
+            )?;
+            let record = |conv: &str, call: &str| RecordCallRequest {
+                conversation_id: conv.into(),
+                call_id: call.into(),
+                caller_account_id: "11111111-1111-4111-8111-111111111111".into(),
+                status: "missed".into(),
+                duration_ms: 0,
+                started_at: now_ms(),
+            };
+            let before = now_ms();
+            i.record_call(record("timed", "aaaa-1"))?;
+            i.record_call(record("plain", "bbbb-2"))?;
+            let timed = i.message_row("sys-call-aaaa-1")?.expect("timed entry");
+            let at = timed.expires_at.expect("a deadline in a timed chat");
+            assert!(at >= before + 21_600_000 && at <= now_ms() + 21_600_000, "the chat's 6 h from now");
+            assert_eq!(timed.expires_in, 21_600);
+            assert!(timed.is_disappearing(), "so it is never backed up to the vault");
+            let plain = i.message_row("sys-call-bbbb-2")?.expect("plain entry");
+            assert_eq!((plain.expires_at, plain.expires_in), (None, 0));
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 }

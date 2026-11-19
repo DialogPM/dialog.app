@@ -13,6 +13,7 @@ import '../../services/battery.dart';
 import '../chats/qr_sheet.dart';
 import '../lock/data_lock_screen.dart';
 import '../../l10n/i18n.dart';
+import '../../state/actions.dart' show attempt;
 import '../../state/store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_icon.dart';
@@ -43,6 +44,34 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   bool _askedLocalPassword = false;
   bool _askedWeakPassword = false;
   bool _checkedBattery = false;
+  bool _checkedStaleDevices = false;
+
+  /// A linked device that has not connected for a week: messages keep queueing on the server
+  /// for it until it comes back or is unlinked (the server unlinks it after 30 days). One device
+  /// at a time, at most once a week per device (same as the desktop's StaleDeviceNudge).
+  Future<void> _offerStaleDeviceUnlink() async {
+    const day = 86400000;
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final stale = (await backend.listDevices()).where((d) => !d.current && now - d.lastSeenAt >= 7 * day).toList()
+        ..sort((a, b) => a.lastSeenAt.compareTo(b.lastSeenAt));
+      for (final d in stale) {
+        final name = 'stale_dev_${d.deviceId}_${d.createdAt}';
+        final shownAt = await backend.reminderShownAt(name);
+        if (shownAt != null && now - shownAt < 7 * day) continue;
+        await backend.markReminderShown(name);
+        if (!mounted) return;
+        final remove = await showConfirm(
+          context,
+          title: context.t('settings.devices.staleTitle', args: {'name': d.name}, count: (now - d.lastSeenAt) ~/ day),
+          body: context.t('settings.devices.staleText'),
+          confirmLabel: context.t('settings.devices.staleUnlink'),
+        );
+        if (remove) await attempt(() => backend.unlinkDevice(d.deviceId));
+        return;
+      }
+    } catch (_) {}
+  }
 
   /// Android: offer the battery optimization exemption once, so calls are not cut when the
   /// screen locks and messages arrive on time.
@@ -90,6 +119,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (!_checkedBattery && !outdated && !weak) {
       _checkedBattery = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _offerBatteryExemption());
+    }
+    if (!_checkedStaleDevices && !outdated && !weak) {
+      _checkedStaleDevices = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_offerStaleDeviceUnlink()));
     }
     return PopScope(
       canPop: _tab == 0,

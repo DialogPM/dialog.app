@@ -28,7 +28,7 @@ pub mod invites;
 pub mod keytrans;
 mod link;
 mod media;
-mod local_lock;
+pub(crate) mod local_lock;
 mod marks;
 mod messages;
 mod net;
@@ -196,6 +196,11 @@ pub struct Session {
     pub registration_id: u32,
 }
 
+/// Signal device ids are one byte, 1..=127 (libsignal `DeviceId::new`).
+pub fn valid_device_id(id: u32) -> bool {
+    (1..=127).contains(&id)
+}
+
 impl Session {
     pub fn local_address(&self) -> ProtocolAddress {
         ProtocolAddress::new(
@@ -361,6 +366,10 @@ impl Inner {
         let secret = db.kv_get("account_secret")?;
         let reg: Option<u32> = db.kv_get_json("registration_id")?;
         if let (Some(account), Some(token), Some(secret), Some(reg)) = (account, token, secret, reg) {
+            if !valid_device_id(account.device_id) {
+                log::error!("stored session has an invalid device id ({}); a new login is needed", account.device_id);
+                return Ok(());
+            }
             let secret = AccountSecret(crate::crypto::key32(&secret)?);
             let keys = AccountKeys::derive(&secret)?;
             let api = ApiClient::new(&account.server_url, Some(token));
@@ -371,6 +380,11 @@ impl Inner {
 
     /// Persists a new session and makes it current.
     fn set_session(&self, account: AccountInfo, token: String, secret: &AccountSecret, reg: u32) -> Result<()> {
+        // The server chooses our device id; the protocol only has room for 1..=127, and a
+        // value outside it would make every envelope handler fail (`local_address`).
+        if !valid_device_id(account.device_id) {
+            return Err(CoreError::invalid(format!("the server assigned an invalid device id ({})", account.device_id)));
+        }
         {
             let db = self.db.borrow();
             db.kv_set_json("account", &account)?;

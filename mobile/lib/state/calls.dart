@@ -9,6 +9,12 @@
 // Video: the offer carries `video: true`; both sides send a camera track on the same peer
 // connection. Turning the camera off only disables the track and tells the peer with a "media"
 // signal, so it shows the avatar instead of black frames.
+//
+// Screen sharing: a phone never shares its screen, but it watches a desktop's and can ask for
+// it. The screen travels on the call's single video section (a desktop in a video call sends it
+// in place of its camera; in a voice call it adds the section with a "renegotiate" offer, which
+// we answer). "media" `{screen: bool}` tells what the peer's video is; "screen" `{request: true}`
+// asks for it, `{declined: true}` says no (we answer `unsupported: true` when asked).
 
 import 'dart:async';
 import 'dart:io';
@@ -44,6 +50,8 @@ const _restartDelay = Duration(seconds: 2);
 /// At most one ICE restart this often while the connection is down.
 const _restartEvery = Duration(seconds: 8);
 const _iceBatch = Duration(milliseconds: 120);
+/// A request to see the peer's screen is given up (button enabled again) after this long.
+const _askTimeout = Duration(seconds: 30);
 
 enum CallPhase { outgoing, incoming, connecting, active }
 
@@ -65,6 +73,13 @@ class CallState {
   final bool cameraOn;
   /// The peer's camera is sending.
   final bool remoteCameraOn;
+  /// The peer's video is its screen, not its camera.
+  final bool remoteScreenOn;
+  /// We asked to see the peer's screen and wait for it.
+  final bool screenAsked;
+  /// Bumped when a remote track arrives (the peer's screen in a voice call): the stream object
+  /// may be the same, the renderer binds it again.
+  final int streamVersion;
   final bool speaker;
   final MediaStream? localStream;
   final MediaStream? remoteStream;
@@ -93,6 +108,9 @@ class CallState {
     required this.video,
     required this.cameraOn,
     required this.remoteCameraOn,
+    this.remoteScreenOn = false,
+    this.screenAsked = false,
+    this.streamVersion = 0,
     required this.speaker,
     this.localStream,
     this.remoteStream,
@@ -107,12 +125,18 @@ class CallState {
 
   bool get hasCamera => localStream?.getVideoTracks().isNotEmpty ?? false;
 
+  /// The peer's screen is on the wire and received.
+  bool get remoteScreen => remoteScreenOn && (remoteStream?.getVideoTracks().isNotEmpty ?? false);
+
   CallState copyWith({
     CallPhase? phase,
     bool? ringing,
     bool? muted,
     bool? cameraOn,
     bool? remoteCameraOn,
+    bool? remoteScreenOn,
+    bool? screenAsked,
+    int? streamVersion,
     bool? speaker,
     MediaStream? localStream,
     MediaStream? remoteStream,
@@ -136,6 +160,9 @@ class CallState {
         video: video,
         cameraOn: cameraOn ?? this.cameraOn,
         remoteCameraOn: remoteCameraOn ?? this.remoteCameraOn,
+        remoteScreenOn: remoteScreenOn ?? this.remoteScreenOn,
+        screenAsked: screenAsked ?? this.screenAsked,
+        streamVersion: streamVersion ?? this.streamVersion,
         speaker: speaker ?? this.speaker,
         localStream: localStream ?? this.localStream,
         remoteStream: remoteStream ?? this.remoteStream,
@@ -151,6 +178,10 @@ class CallState {
 
 /// The current call (null when there is none).
 final callState = ValueNotifier<CallState?>(null);
+
+/// The call screen was minimized: the app is usable and a bar on top shows the call
+/// (features/calls/call_screen.dart). Back to false when the call ends.
+final callMinimized = ValueNotifier<bool>(false);
 
 void _set(CallState Function(CallState c) update) {
   final c = callState.value;
@@ -182,6 +213,7 @@ class _Session {
   Timer? ringTimer;
   Timer? disconnectTimer;
   Timer? restartTimer;
+  Timer? askTimer;
   /// Caller: an ICE restart offer is waiting for its answer.
   bool restartPending = false;
   DateTime? lastRestart;
@@ -332,7 +364,7 @@ Future<RTCPeerConnection> _createPeerConnection(List<Map<String, dynamic>> serve
   pc.onTrack = (e) {
     if (_session != s || e.streams.isEmpty) return;
     final remote = e.streams.first;
-    _set((c) => c.copyWith(remoteStream: remote));
+    _set((c) => c.copyWith(remoteStream: remote, streamVersion: c.streamVersion + 1));
   };
   pc.onConnectionState = (state) {
     if (_session != s) return;
@@ -442,12 +474,14 @@ void _cleanup({bool local = false, bool failed = false}) {
   s.ringTimer?.cancel();
   s.disconnectTimer?.cancel();
   s.restartTimer?.cancel();
+  s.askTimer?.cancel();
   s.qualityTimer?.cancel();
   unawaited(VoiceFxNative.configure('none', false));
   final stream = s.stream;
   final pc = s.pc;
   _session = null;
   callState.value = null;
+  callMinimized.value = false;
   // The ringing notification / system call screen go with the call.
   unawaited(Notifications.instance.cancelCall());
   unawaited(CallKit.end(s.callId, local: local, failed: failed));
@@ -699,6 +733,20 @@ Future<void> toggleSpeaker() async {
   }
 }
 
+/// Asks the peer (a desktop) to share its screen.
+void askForScreen() {
+  final call = callState.value;
+  final s = _session;
+  if (call == null || s == null || s.peerDevice == null || call.screenAsked || call.remoteScreenOn) return;
+  if (call.phase != CallPhase.connecting && call.phase != CallPhase.active) return;
+  _set((c) => c.copyWith(screenAsked: true));
+  unawaited(_signal('screen', {'request': true}));
+  s.askTimer?.cancel();
+  s.askTimer = Timer(_askTimeout, () {
+    if (_session == s) _set((c) => c.copyWith(screenAsked: false));
+  });
+}
+
 Future<void> _release(MediaStream? stream) async {
   if (stream == null) return;
   for (final t in stream.getTracks()) {
@@ -852,6 +900,7 @@ Future<void> handleCallSignal(CallSignalEvent ev) async {
       // Answered on the notification or the system call screen before the offer arrived.
       if (_pendingAnswer == ev.callId) {
         _pendingAnswer = null;
+        unawaited(setShowOverLockScreen(true));
         unawaited(acceptCall());
       }
     case 'ringing':
@@ -919,6 +968,30 @@ Future<void> handleCallSignal(CallSignalEvent ev) async {
       }
       await _applyRemoteIce();
       _flushLocalIce();
+    case 'renegotiate':
+      // The media of the call in progress changed (the peer's screen in a voice call): a new
+      // offer from the device we talk to, on the same peer connection, answered like a restart.
+      if (current == null || s == null || ev.deviceId != s.peerDevice) return;
+      if (current.phase != CallPhase.connecting && current.phase != CallPhase.active) return;
+      final sdp = _sdpOf(ev.data);
+      final pc = s.pc;
+      if (sdp == null || pc == null) return;
+      // Our ICE restart offer is waiting for its answer: the peer (the callee) gives way and
+      // answers it first, then offers again.
+      if (await pc.getSignalingState() == RTCSignalingState.RTCSignalingStateHaveLocalOffer) return;
+      try {
+        await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+        final answer = tuned(await pc.createAnswer());
+        if (_session != s || s.ended) return;
+        await pc.setLocalDescription(answer);
+        if (_session != s || s.ended) return;
+        await _signal('answer', {'sdp': answer.sdp});
+      } catch (e) {
+        debugPrint('call: renegotiation offer rejected: $e');
+        return;
+      }
+      await _applyRemoteIce();
+      _flushLocalIce();
     case 'ice':
       if (current == null || s == null) return;
       // Before the answer, only candidates from the device we will talk to matter.
@@ -929,6 +1002,22 @@ Future<void> handleCallSignal(CallSignalEvent ev) async {
       if (current == null || s == null || ev.deviceId != s.peerDevice) return;
       final camera = ev.data?['camera'];
       if (camera is bool) _set((c) => c.copyWith(remoteCameraOn: camera));
+      final screen = ev.data?['screen'];
+      if (screen is bool) {
+        if (screen) s.askTimer?.cancel();
+        _set((c) => c.copyWith(remoteScreenOn: screen, screenAsked: screen ? false : null));
+      }
+    case 'screen':
+      if (current == null || s == null || ev.deviceId != s.peerDevice) return;
+      if (ev.data?['request'] == true) {
+        // A phone cannot share its screen.
+        unawaited(_signal('screen', {'declined': true, 'unsupported': true}));
+      } else if (ev.data?['declined'] == true && current.screenAsked) {
+        s.askTimer?.cancel();
+        _set((c) => c.copyWith(screenAsked: false));
+        final key = ev.data?['unsupported'] == true ? 'call.screenUnsupported' : 'call.screenDeclined';
+        showToast(tr(key, args: {'name': current.peerName}));
+      }
     case 'busy':
       if (current != null && current.outgoing && current.phase == CallPhase.outgoing) {
         showToast(tr('call.busy', args: {'name': current.peerName}));
@@ -1013,8 +1102,10 @@ Future<void> handleCallAction(String action, String callId) async {
   }
   switch (action) {
     case 'answer':
-      unawaited(setShowOverLockScreen(true));
       if (current?.phase == CallPhase.incoming) {
+        // Over the lock screen only for a call that is really ringing (an "answer" for an
+        // unknown id must not leave the app showing over the keyguard).
+        unawaited(setShowOverLockScreen(true));
         await acceptCall();
       } else if (current == null) {
         _pendingAnswer = callId;
@@ -1033,7 +1124,7 @@ Future<void> handleCallAction(String action, String callId) async {
       }
     default:
       // Notification tapped (or full-screen intent): the app shows the ringing call.
-      if (current != null) unawaited(setShowOverLockScreen(true));
+      unawaited(setShowOverLockScreen(current != null));
   }
 }
 

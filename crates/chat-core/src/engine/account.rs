@@ -64,6 +64,7 @@ impl Inner {
             default_server_url: self.default_server_url.clone(),
             pending_mnemonic: self.db.borrow().kv_get_json("pending_mnemonic").ok().flatten(),
             local_protected: self.local_protected(),
+            auto_unlock: self.auto_unlock_enabled(),
         }
     }
 

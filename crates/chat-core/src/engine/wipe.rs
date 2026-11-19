@@ -159,6 +159,9 @@ impl Inner {
             .query_row("SELECT id FROM conversations WHERE group_id = ?1", [group_id], |r| r.get(0))
             .ok();
         let Some(conv) = conv else { return Ok(()) };
+        // "Cleared before" never reaches into the future: `i64::MAX` would otherwise drop
+        // every message the group sends from now on.
+        let before = before.min(crate::util::now_ms() + 5 * 60_000);
         self.apply_group_history_cleared(&conv, sender, before)
     }
 

@@ -76,9 +76,28 @@ Future<void> reloadAfterProfileSwitch({required bool opened}) async {
 }
 
 /// Opens a saved account with its password (throws on a wrong one; nothing changes then).
-Future<void> openProfile(String id, String password) async {
-  await backend.openProfile(id: id, password: password);
+/// [remember]: also turn on "remember the password on this phone" for it.
+Future<void> openProfile(String id, String password, {bool remember = false}) async {
+  await backend.openProfile(id: id, password: password, remember: remember);
   await reloadAfterProfileSwitch(opened: true);
+}
+
+/// Opens a saved account whose "remember the password on this phone" is on, without a
+/// password. False when it needs its password after all (then nothing changed). The app lock
+/// still applies afterwards (the password was not entered).
+Future<bool> openProfileAuto(ProfileCard p) async {
+  if (p.active) return true;
+  if (!p.autoUnlock) return false;
+  await _endSessionUi();
+  try {
+    await backend.openProfileAuto(p.id);
+  } catch (e) {
+    if (parseError(e).code == 'password_required') return false;
+    notifyError(e);
+    return true;
+  }
+  await reloadAfterProfileSwitch(opened: false);
+  return true;
 }
 
 /// Quick switch to an account opened with its password since the app started. False when it

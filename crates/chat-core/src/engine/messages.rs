@@ -539,6 +539,26 @@ impl Inner {
         id: Option<String>,
         at: i64,
     ) -> Result<()> {
+        self.insert_system_message_expiring(conv_id, kind, actor, targets, value, id, at, 0)
+    }
+
+    /// [`Self::insert_system_message`] for a notice that is part of the conversation's content
+    /// (a call): with a disappearing timer of `timer_seconds` it goes away like the messages
+    /// around it, `timer_seconds` after it was recorded. 0 keeps it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_system_message_expiring(
+        &self,
+        conv_id: &str,
+        kind: &str,
+        actor: Option<String>,
+        targets: Vec<String>,
+        value: Option<String>,
+        id: Option<String>,
+        at: i64,
+        timer_seconds: i64,
+    ) -> Result<()> {
+        let timer_seconds = timer_seconds.max(0);
+        let expires_at = (timer_seconds > 0).then(|| now_ms().saturating_add(timer_seconds.saturating_mul(1000)));
         let id = id.map(|i| format!("sys-{i}")).unwrap_or_else(new_id);
         let inserted = self.insert_message(NewMessage {
             id: id.clone(),
@@ -556,8 +576,8 @@ impl Inner {
             status: "read".into(),
             sent_at: at,
             received_at: now_ms(),
-            expires_in: 0,
-            expires_at: None,
+            expires_in: timer_seconds,
+            expires_at,
             system: Some(StoredSystemEvent { kind: kind.to_string(), actor, targets, value }),
         })?;
         if inserted {

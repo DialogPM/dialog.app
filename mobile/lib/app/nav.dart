@@ -17,14 +17,42 @@ NavigatorState? get _nav => navigatorKey.currentState;
 Route<T> pageRoute<T>(Widget page, {String? name}) =>
     MaterialPageRoute<T>(builder: (_) => page, settings: RouteSettings(name: name));
 
-/// Opens a conversation on top of the chat list (replacing any open conversation).
+/// Name of the app-lock route (app.dart); nothing may be pushed over it or pop it.
+const lockRouteName = 'lock';
+
+/// A conversation asked for while the app was locked (a tapped notification): opened by
+/// [openPendingChat] once the user unlocked.
+String? _pendingChat;
+
+/// Opens a conversation on top of the chat list (replacing any open conversation). While the
+/// app is locked the request is kept for after the unlock: `popUntil` would otherwise remove
+/// the lock route (it pops without asking `PopScope`), showing the chat without the password.
 void openChat(String conversationId, {String? highlightId}) {
+  if (appData.locked) {
+    _pendingChat = conversationId;
+    return;
+  }
   prepareConversation(conversationId);
   if (highlightId != null) store.set((d) => d.copyWith(highlightId: highlightId));
   final nav = _nav;
   if (nav == null) return;
-  nav.popUntil((r) => r.isFirst);
+  var lockOnTop = false;
+  nav.popUntil((r) {
+    if (r.settings.name == lockRouteName) lockOnTop = true;
+    return lockOnTop || r.isFirst;
+  });
+  if (lockOnTop) {
+    _pendingChat = conversationId;
+    return;
+  }
   nav.push(pageRoute<void>(ConversationPage(conversationId: conversationId), name: 'chat'));
+}
+
+/// Opens the conversation requested while locked, if any (called after the lock is lifted).
+void openPendingChat() {
+  final id = _pendingChat;
+  _pendingChat = null;
+  if (id != null) openChatFromNotification(id);
 }
 
 void openChatFromNotification(String conversationId) {

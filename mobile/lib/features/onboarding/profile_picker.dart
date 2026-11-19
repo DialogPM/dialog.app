@@ -16,6 +16,7 @@ import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
 import '../../widgets/ui.dart';
+import '../lock/remember_password.dart';
 
 /// The listed profiles; a tap shows the password field. [onChanged]: the list changed (a
 /// profile's local data was deleted).
@@ -47,8 +48,10 @@ class _ProfileListState extends State<ProfileList> {
               profile: p,
               open: _open == p.id,
               onTap: () async {
-                // Opened earlier in this run of the app: no password needed.
+                // Opened earlier in this run of the app, or "remember the password on this
+                // phone" is on for it: no password needed.
                 if (p.unlocked && await quickSwitch(p)) return;
+                if (p.autoUnlock && await openProfileAuto(p)) return;
                 if (mounted) setState(() => _open = _open == p.id ? null : p.id);
               },
             ),
@@ -83,7 +86,7 @@ class _ProfileRow extends StatelessWidget {
             if (sub.isNotEmpty) Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: t.muted, mono: true)),
           ]),
         ),
-        if (profile.unlocked)
+        if (profile.unlocked || profile.autoUnlock)
           Text(context.t('profiles.unlocked'), style: ts(13, weight: 600, color: t.accentText))
         else
           AnimatedRotation(
@@ -109,6 +112,7 @@ class _UnlockForm extends StatefulWidget {
 
 class _UnlockFormState extends State<_UnlockForm> {
   final _password = TextEditingController();
+  bool _remember = false;
   bool _busy = false;
   String? _error;
 
@@ -125,7 +129,7 @@ class _UnlockFormState extends State<_UnlockForm> {
       _error = null;
     });
     try {
-      await openProfile(widget.profile.id, _password.text);
+      await openProfile(widget.profile.id, _password.text, remember: _remember);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -166,7 +170,9 @@ class _UnlockFormState extends State<_UnlockForm> {
           onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _submit(),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+        RememberPasswordCheck(on: _remember, onChanged: (v) => setState(() => _remember = v)),
+        const SizedBox(height: 10),
         Btn(
           label: context.t(_busy ? 'profiles.opening' : 'profiles.open'),
           busy: _busy,

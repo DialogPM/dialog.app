@@ -503,9 +503,18 @@ class Backend {
   // Opening or closing a profile swaps the core under the app: the session state is reloaded
   // afterwards (state/profiles.dart).
   Future<List<ProfileCard>> listProfiles() async => (await _list('profiles_list')).map(ProfileCard.fromJson).toList();
-  Future<void> openProfile({required String id, required String password}) => call('profile_open', {'id': id, 'password': password});
-  Future<void> openProfileByNumber({required String number, required String password}) =>
-      call('profile_open_by_number', {'number': number, 'password': password});
+  Future<void> openProfile({required String id, required String password, bool remember = false}) =>
+      call('profile_open', {'id': id, 'password': password, 'remember': remember});
+  Future<void> openProfileByNumber({required String number, required String password, bool remember = false}) =>
+      call('profile_open_by_number', {'number': number, 'password': password, 'remember': remember});
+  /// Opens a profile with "remember the password" on, without a password ("password_required" otherwise).
+  Future<void> openProfileAuto(String id) => call('profile_open_auto', {'id': id});
+  /// App start: opens the most recent profile with "remember the password" on (once per run).
+  Future<bool> autoOpenProfiles() async => (await _obj('profiles_auto_open'))['opened'] == true;
+  /// "Remember the password on this phone" (opt-in, per profile; engine/local_lock.rs): on, the
+  /// database key is kept on disk and the account opens at startup without the password.
+  Future<void> setAutoUnlock({required bool enabled, String? password}) =>
+      call('set_auto_unlock', {'enabled': enabled, 'password': ?password});
   /// Quick switch to an account opened with its password since the app started
   /// (error "password_required" otherwise).
   Future<void> switchProfile(String id) => call('profile_switch', {'id': id});
@@ -621,6 +630,10 @@ class Backend {
 
   /// This account's push tag on this phone (pushes carry it as `p`).
   Future<String> pushTag() async => (await call('push_tag')) as String;
+
+  /// When a reminder (a name of [a-z0-9_], at most 32) was last shown, kept in the local database.
+  Future<int?> reminderShownAt(String name) async => (await call('reminder_shown_at', {'name': name})) as int?;
+  Future<void> markReminderShown(String name) => call('mark_reminder_shown', {'name': name});
 
   /// A push arrived: connect now (or check the open socket) and fetch what waits.
   Future<void> pushWake() => call('push_wake');

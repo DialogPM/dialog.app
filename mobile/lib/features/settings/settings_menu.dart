@@ -156,6 +156,7 @@ class _QuickAccountsState extends State<_QuickAccounts> {
 
   Future<void> _switch(ProfileCard p) async {
     if (await quickSwitch(p) || !mounted) return;
+    if (p.autoUnlock && (await openProfileAuto(p) || !mounted)) return;
     final name = profileName(p, context.t('profiles.account'));
     final pw = TextEditingController();
     await showAppDialog<void>(context, title: context.t('profiles.passwordFor', args: {'name': name}), builder: (ctx) {

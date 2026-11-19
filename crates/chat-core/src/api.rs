@@ -10,6 +10,9 @@ use serde_json::Value;
 use crate::crypto::KdfParams;
 use crate::error::{CoreError, ErrorCode, Result};
 
+/// Largest JSON response body accepted from the server (attachments stream separately).
+const MAX_RESPONSE_BYTES: usize = 16 << 20;
+
 #[derive(Clone)]
 pub struct ApiClient {
     pub base: String,
@@ -289,6 +292,10 @@ pub struct SendReq {
     /// only this id (server API section 14). The content itself stays encrypted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
+    /// Set on call signalling that follows an offer: delivered and stored as usual, but the
+    /// server sends no push for it (it would show "New message" on the callee's phone).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_push: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -406,6 +413,9 @@ impl ApiClient {
             reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(60))
+                // Never follow redirects: reqwest keeps Authorization on a same-host redirect
+                // (https -> http included) and never strips our own auth headers.
+                .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("Dialog/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .expect("http client")
@@ -431,6 +441,26 @@ impl ApiClient {
             rb = rb.bearer_auth(t);
         }
         rb
+    }
+
+    /// Reads a JSON response body of at most `MAX_RESPONSE_BYTES` (a server must not be able
+    /// to make the client allocate without bound).
+    async fn body_limited(resp: reqwest::Response) -> ApiResult<Vec<u8>> {
+        use futures_util::StreamExt;
+        let too_large = || ApiErrorOrNet::Net(CoreError::internal("response too large"));
+        if resp.content_length().is_some_and(|n| n > MAX_RESPONSE_BYTES as u64) {
+            return Err(too_large());
+        }
+        let mut stream = resp.bytes_stream();
+        let mut buf = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if buf.len() + chunk.len() > MAX_RESPONSE_BYTES {
+                return Err(too_large());
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        Ok(buf)
     }
 
     async fn check(resp: reqwest::Response) -> ApiResult<reqwest::Response> {
@@ -462,7 +492,7 @@ impl ApiClient {
             return serde_json::from_value(Value::Null)
                 .map_err(|e| ApiErrorOrNet::Net(CoreError::internal(format!("decode: {e}"))));
         }
-        let bytes = resp.bytes().await?;
+        let bytes = Self::body_limited(resp).await?;
         let v: Value = if bytes.is_empty() {
             Value::Null
         } else {
@@ -508,7 +538,7 @@ impl ApiClient {
             rb = rb.json(b);
         }
         let resp = Self::check(rb.send().await?).await?;
-        let bytes = resp.bytes().await?;
+        let bytes = Self::body_limited(resp).await?;
         let v: Value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
         serde_json::from_value(v).map_err(|e| ApiErrorOrNet::Net(CoreError::internal(format!("decode {path}: {e}"))))
     }
@@ -521,7 +551,7 @@ impl ApiClient {
             rb = rb.json(b);
         }
         let resp = Self::check(rb.send().await?).await?;
-        let bytes = resp.bytes().await?;
+        let bytes = Self::body_limited(resp).await?;
         let v: Value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
         serde_json::from_value(v).map_err(|e| ApiErrorOrNet::Net(CoreError::internal(format!("decode {path}: {e}"))))
     }
@@ -538,7 +568,7 @@ impl ApiClient {
     /// tell the server who is asking).
     pub async fn get_anonymous<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         let resp = Self::check(self.sealed_http.get(self.url(path)).send().await?).await?;
-        let bytes = resp.bytes().await?;
+        let bytes = Self::body_limited(resp).await?;
         serde_json::from_slice(&bytes).map_err(|e| ApiErrorOrNet::Net(CoreError::internal(format!("decode {path}: {e}"))))
     }
 

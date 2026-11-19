@@ -229,6 +229,16 @@ ALTER TABLE contacts ADD COLUMN chat_timer INTEGER;
 "#, r#"
 -- 14: messages are listed in arrival order (received_at, engine/messages.rs get_messages).
 CREATE INDEX messages_conv_received ON messages(conversation_id, received_at);
+"#, r#"
+-- 15: call history entries in chats with disappearing messages disappear like the messages
+-- (engine/calls.rs record_call_message). Entries recorded before that never got a deadline:
+-- they get the chat's timer from when the call happened, so old ones go at the next expiry run.
+UPDATE messages
+   SET expires_in = (SELECT c.disappearing_seconds FROM conversations c WHERE c.id = messages.conversation_id),
+       expires_at = sent_at + 1000 * (SELECT c.disappearing_seconds FROM conversations c WHERE c.id = messages.conversation_id)
+ WHERE kind = 'system' AND expires_at IS NULL
+   AND json_extract(system_json, '$.type') = 'call'
+   AND (SELECT c.disappearing_seconds FROM conversations c WHERE c.id = messages.conversation_id) > 0;
 "#];
 
 pub struct Db {
@@ -359,5 +369,39 @@ mod tests {
         let db = Db::open(&path, &k2).unwrap();
         assert_eq!(db.kv_get("a").unwrap().unwrap(), b"secret value");
         assert_eq!(db.kv_get("b").unwrap().unwrap(), b"after");
+    }
+
+    /// Migration 15: call entries already in a chat with a timer get its deadline (from when
+    /// the call happened); other notices, other chats and entries with a deadline are kept.
+    #[test]
+    fn old_call_entries_get_the_chat_timer() {
+        let db = Db::open_in_memory().unwrap();
+        let c = &db.conn;
+        c.execute_batch(
+            "INSERT INTO conversations (id, kind, created_at, updated_at, disappearing_seconds) VALUES
+                ('timed', 'direct', 0, 0, 3600), ('plain', 'direct', 0, 0, 0);",
+        )
+        .unwrap();
+        let call = r#"{"type":"call","actor":"a","targets":[],"value":"{\"status\":\"missed\"}"}"#;
+        let other = r#"{"type":"disappearing_changed","actor":"a","targets":[],"value":"3600"}"#;
+        for (id, conv, sys, expires) in
+            [("c1", "timed", call, None), ("c2", "plain", call, None), ("n1", "timed", other, None), ("c3", "timed", call, Some(99i64))]
+        {
+            c.execute(
+                "INSERT INTO messages (id, conversation_id, sender_account_id, sender_device, outgoing, kind, status, sent_at,
+                    received_at, expires_in, expires_at, system_json, read_local)
+                 VALUES (?1, ?2, 'a', 0, 0, 'system', 'read', 1000, 1000, 0, ?4, ?3, 1)",
+                params![id, conv, sys, expires],
+            )
+            .unwrap();
+        }
+        c.execute_batch(MIGRATIONS[14]).unwrap();
+        let get = |id: &str| -> (i64, Option<i64>) {
+            c.query_row("SELECT expires_in, expires_at FROM messages WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+        };
+        assert_eq!(get("c1"), (3600, Some(1000 + 3_600_000)), "call in a timed chat");
+        assert_eq!(get("c2"), (0, None), "chat without a timer");
+        assert_eq!(get("n1"), (0, None), "other notices are not touched");
+        assert_eq!(get("c3"), (0, Some(99)), "a deadline already set stays");
     }
 }

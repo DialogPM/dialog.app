@@ -240,7 +240,8 @@ pub fn check_kdf(kdf: &KdfParams) -> Result<()> {
     if kdf.alg != "argon2id" {
         return Err(CoreError::invalid(format!("unsupported kdf {}", kdf.alg)));
     }
-    if kdf.m > 1024 * 1024 || kdf.t > 20 || kdf.p > 8 || kdf.p < 1 {
+    // m is in KiB: at most 256 MiB, which a phone can still allocate for one login.
+    if kdf.m > 256 * 1024 || kdf.t > 20 || kdf.p > 8 || kdf.p < 1 {
         return Err(CoreError::invalid("unsafe kdf parameters"));
     }
     if kdf.m < MIN_KDF_M || kdf.t < MIN_KDF_T {

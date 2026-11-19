@@ -1,5 +1,7 @@
 package pm.dialog.chat
 
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +14,11 @@ import io.flutter.plugin.common.MethodChannel
 
 // FlutterFragmentActivity is required by local_auth (biometric app lock).
 class MainActivity : FlutterFragmentActivity() {
+    companion object {
+        /** Id of the incoming-call notification (mobile/lib/services/notifications.dart). */
+        const val CALL_NOTIFICATION_ID = 2
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var clearClipboard: Runnable? = null
 
@@ -30,10 +37,17 @@ class MainActivity : FlutterFragmentActivity() {
 
     /** Opened from an incoming-call notification (full-screen intent or Answer): show over the
      *  lock screen and turn the screen on. Never otherwise, so the app does not appear over the
-     *  lock screen by itself; Dart turns it off again when the call ends. */
+     *  lock screen by itself; Dart turns it off again when the call ends. The activity is
+     *  exported (launcher), so the extra alone proves nothing: any app could send it. It is
+     *  honoured only while our incoming-call notification is actually showing. */
     private fun showOverLockScreenForCall(intent: Intent?) {
         val payload = intent?.getStringExtra("payload") ?: return
-        if (payload.startsWith("call:")) setShowWhenLockedCompat(true)
+        if (payload.startsWith("call:") && incomingCallNotificationShowing()) setShowWhenLockedCompat(true)
+    }
+
+    private fun incomingCallNotificationShowing(): Boolean {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        return nm.activeNotifications.any { it.id == CALL_NOTIFICATION_ID }
     }
 
     @Suppress("DEPRECATION")
@@ -68,6 +82,10 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 "stop" -> {
                     CallService.stop(applicationContext)
+                    result.success(null)
+                }
+                "alert" -> {
+                    CallService.alert(applicationContext)
                     result.success(null)
                 }
                 "setProximity" -> {

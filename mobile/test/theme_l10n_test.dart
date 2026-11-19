@@ -53,12 +53,38 @@ void main() {
 
   group('i18n', () {
     test('all languages have the same keys as English', () {
-      final en = kStrings['en']!.keys.where((k) => !RegExp(r'_(one|few|other)$').hasMatch(k)).toSet();
-      for (final lang in ['ro', 'it']) {
-        final keys = kStrings[lang]!.keys.map((k) => k.replaceAll(RegExp(r'_(one|few|other)$'), '')).toSet();
+      final suffix = RegExp(r'_(zero|one|two|few|many|other)$');
+      final en = kStrings['en']!.keys.where((k) => !suffix.hasMatch(k)).toSet();
+      expect(kStrings.keys.toSet(), {for (final l in kLanguages) l.code});
+      for (final l in kLanguages) {
+        final keys = kStrings[l.code]!.keys.map((k) => k.replaceAll(suffix, '')).toSet();
         final missing = en.where((k) => !keys.contains(k)).toList();
-        expect(missing, isEmpty, reason: '$lang is missing $missing');
+        expect(missing, isEmpty, reason: '${l.code} is missing $missing');
       }
+    });
+
+    test('every plural string has the form each language needs', () {
+      final suffix = RegExp(r'_(zero|one|two|few|many|other)$');
+      final plurals = kStrings['en']!.keys.where(suffix.hasMatch).map((k) => k.replaceAll(suffix, '')).toSet();
+      for (final l in kLanguages) {
+        for (final key in plurals) {
+          for (final n in [0, 1, 2, 3, 5, 11, 21, 22, 25, 100, 101, 111]) {
+            final cat = pluralCategory(l.code, n);
+            expect(kStrings[l.code]!.containsKey('${key}_$cat') || kStrings[l.code]!.containsKey('${key}_other'), isTrue,
+                reason: '${l.code}: ${key}_$cat');
+            expect(translate(l.code, key, count: n), isNot(contains('{{count}}')), reason: '${l.code}: $key ($n)');
+          }
+        }
+      }
+    });
+
+    test('plural categories', () {
+      expect([1, 2, 5, 11, 21, 22, 25].map((n) => pluralCategory('ru', n)), ['one', 'few', 'many', 'many', 'one', 'few', 'many']);
+      expect([1, 2, 5, 12, 22].map((n) => pluralCategory('pl', n)), ['one', 'few', 'many', 'many', 'few']);
+      expect([0, 1, 2, 3, 11, 100].map((n) => pluralCategory('ar', n)), ['zero', 'one', 'two', 'few', 'many', 'other']);
+      expect([0, 1, 2].map((n) => pluralCategory('fr', n)), ['one', 'one', 'other']);
+      expect([1, 2].map((n) => pluralCategory('ja', n)), ['other', 'other']);
+      expect([0, 1, 2].map((n) => pluralCategory('de', n)), ['other', 'one', 'other']);
     });
 
     test('interpolation and Romanian plurals', () {

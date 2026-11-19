@@ -64,7 +64,8 @@ Future<void> main() async {
     prefsFilePath = '$dataDir/prefs.json';
     currentLanguage = container.read(prefsProvider).language ?? systemLanguage();
     unawaited(applyScreenSecurity(container.read(prefsProvider).screenSecurity));
-    await Future.wait([initializeDateFormatting('en_US'), initializeDateFormatting('ro'), initializeDateFormatting('it')]);
+    // Every locale bundled with intl: dates follow the language chosen in the app.
+    await initializeDateFormatting();
 
     // Temporary plaintext files (picked copies, decrypted copies, exports) never outlive a run.
     unawaited(wipeAppTemp());

@@ -28,6 +28,7 @@ import '../../state/media_retention.dart';
 import '../../state/prefs.dart';
 import '../../state/store.dart';
 import '../../theme/app_theme.dart';
+import '../lock/remember_password.dart';
 import '../../theme/tokens.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
@@ -866,6 +867,8 @@ class _PrivacySection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final privacy = ref.watch(storeProvider.select((s) => s.details?.privacy));
     final accountId = ref.watch(storeProvider.select((s) => s.details?.account.accountId));
+    final localProtected = ref.watch(storeProvider.select((s) => s.appState?.localProtected ?? false));
+    final autoUnlock = ref.watch(storeProvider.select((s) => s.appState?.autoUnlock ?? false));
     final p = ref.watch(prefsProvider);
     if (privacy == null) return const Spinner();
     Future<void> update({String? lastSeen, bool? readReceipts, bool? typing}) async {
@@ -918,6 +921,14 @@ class _PrivacySection extends ConsumerWidget {
             title: context.t('settings.privacy.relock.title'),
             sub: context.t('settings.privacy.relock.${_relockKey(p.relockAfterMinutes)}'),
             onTap: () => _chooseRelock(context, p.relockAfterMinutes),
+          ),
+        if (localProtected)
+          ToggleRow(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            label: context.t('autoUnlock.remember'),
+            sub: context.t(autoUnlock ? 'autoUnlock.hintOn' : 'autoUnlock.hintOff'),
+            on: autoUnlock,
+            onToggle: () => autoUnlock ? disableAutoUnlock() : enableAutoUnlock(context),
           ),
         ToggleRow(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
@@ -1920,7 +1931,6 @@ class _LanguageSection extends ConsumerWidget {
             ]),
           ),
       ]),
-      _Hint(context.t('settings.language.hint')),
     ]);
   }
 }

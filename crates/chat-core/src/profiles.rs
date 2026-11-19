@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::engine::local_lock;
 use crate::{Core, CoreConfig, CoreError, ErrorCode, EventSink};
 
 pub const REGISTRY_FILE: &str = "profiles.json";
@@ -40,7 +41,7 @@ pub const LEGACY_ID: &str = "default";
 /// while one of them exists.
 const LOCK_FILES: &[&str] = &["chat.db.lock", "chat.db.lock.tmp"];
 /// Files a profile's data is made of (also the legacy profile inside the base directory).
-const DATA_FILES: &[&str] = &["chat.db", "chat.db-wal", "chat.db-shm", "chat.db.lock", "chat.db.lock.tmp", "chat.db.lock.part", "db.key"];
+const DATA_FILES: &[&str] = &["chat.db", "chat.db-wal", "chat.db-shm", "chat.db.lock", "chat.db.lock.tmp", "chat.db.lock.part", "chat.db.auto", "chat.db.auto.part", "db.key"];
 const DATA_DIRS: &[&str] = &["media", "media-temp"];
 /// Commands after which the active profile's registry entry may need to be created or updated
 /// (the account was just set up, its data locked, or its name changed).
@@ -144,6 +145,9 @@ pub struct ProfileCard {
     pub last_used: i64,
     /// Opened with its password since the app started: switching to it needs no password.
     pub unlocked: bool,
+    /// "Remember the password on this device" is on: opens without a password
+    /// (`profile_open_auto`; at startup `profiles_auto_open` opens the most recent one).
+    pub auto_unlock: bool,
     /// The account in use now.
     pub active: bool,
 }
@@ -230,6 +234,7 @@ impl Registry {
                 server_host: p.server_host.clone(),
                 last_used: p.last_used,
                 unlocked: false,
+                auto_unlock: false,
                 active: false,
             })
             .collect();
@@ -360,6 +365,9 @@ pub struct Profiles {
     /// profile id: switching back to one of them needs no password (quick switch). Only in
     /// memory, wiped when the app quits; a profile that leaves the registry loses its key.
     keys: Mutex<HashMap<String, zeroize::Zeroizing<[u8; 32]>>>,
+    /// [`Profiles::auto_open_at_start`] ran (once per run of the app: "Switch account" must
+    /// land on the start screen, not reopen the same profile).
+    auto_tried: AtomicBool,
 }
 
 /// Error strings in the `"<code>: <message>"` form the UIs parse (backend.ts / backend.dart).
@@ -382,7 +390,17 @@ impl Profiles {
         let rel = format!("{PROFILES_DIR}/{}", new_id());
         let active = start_core(&base, &store, &sink, &default_server_url, &platform, new_id(), rel)?;
         active.live.store(true, Ordering::SeqCst);
-        Ok(Self { base, default_server_url, platform, sink, store, active: RwLock::new(active), switching: Default::default(), keys: Default::default() })
+        Ok(Self {
+            base,
+            default_server_url,
+            platform,
+            sink,
+            store,
+            active: RwLock::new(active),
+            switching: Default::default(),
+            keys: Default::default(),
+            auto_tried: AtomicBool::new(false),
+        })
     }
 
     fn current(&self) -> Active {
@@ -402,10 +420,11 @@ impl Profiles {
     pub fn list(&self) -> Vec<ProfileCard> {
         let active = self.current().id;
         let keys = self.keys.lock().unwrap_or_else(|e| e.into_inner());
-        let mut list = self.store.read(Registry::visible);
+        let (mut list, dirs) = self.store.read(|r| (r.visible(), r.profiles.iter().map(|p| (p.id.clone(), p.dir.clone())).collect::<HashMap<_, _>>()));
         for card in &mut list {
             card.active = card.id == active;
             card.unlocked = card.active || keys.contains_key(&card.id);
+            card.auto_unlock = dirs.get(&card.id).is_some_and(|dir| local_lock::has_auto_unlock(&self.base.join(dir)));
         }
         list
     }
@@ -469,11 +488,16 @@ impl Profiles {
             "profiles_list" => serde_json::to_value(self.list()).map_err(|e| err("internal", &e.to_string())),
             "profile_open" => {
                 let r: OpenReq = parse(req)?;
-                self.open(&r.id, &r.password).await.and_then(|_| done())
+                self.open(&r.id, &r.password, r.remember).await.and_then(|_| done())
             }
+            "profile_open_auto" => {
+                let r: IdReq = parse(req)?;
+                self.open_auto(&r.id).await.and_then(|_| done())
+            }
+            "profiles_auto_open" => Ok(serde_json::json!({ "opened": self.auto_open_at_start().await })),
             "profile_open_by_number" => {
                 let r: OpenByNumberReq = parse(req)?;
-                self.open_by_number(&r.number, &r.password).await.and_then(|_| done())
+                self.open_by_number(&r.number, &r.password, r.remember).await.and_then(|_| done())
             }
             "profile_close" => self.close().await.and_then(|_| done()),
             "profile_forget" => {
@@ -549,8 +573,9 @@ impl Profiles {
     }
 
     /// Opens a profile with its password and makes it the active one. On a wrong password
-    /// nothing changes.
-    pub async fn open(&self, id: &str, password: &str) -> Result<(), String> {
+    /// nothing changes. `remember`: also turn on "remember the password on this device" for it
+    /// (the password just entered is the proof; engine/local_lock.rs).
+    pub async fn open(&self, id: &str, password: &str, remember: bool) -> Result<(), String> {
         let _guard = self.switching.lock().await;
         let Some(entry) = self.store.read(|r| r.get(id).cloned()) else {
             return Err(err("not_found", "no such profile on this device"));
@@ -561,14 +586,18 @@ impl Profiles {
             let pw = password.to_string();
             current
                 .core
-                .run(|i| async move {
+                .run(move |i| async move {
                     if i.locked.get() {
                         i.unlock(&pw).await
                     } else if i.verify_password(&pw).await? {
                         Ok(())
                     } else {
                         Err(CoreError::new(ErrorCode::InvalidPassword, "wrong password"))
+                    }?;
+                    if remember {
+                        i.enable_auto_unlock()?;
                     }
+                    Ok(())
                 })
                 .await
                 .map_err(|e| e.to_string())?;
@@ -579,7 +608,17 @@ impl Profiles {
         let (server, platform, entry_id, entry_dir) = (self.default_server_url.clone(), self.platform.clone(), entry.id.clone(), entry.dir.clone());
         let next = blocking(move || start_core(&base, &store, &sink, &server, &platform, entry_id, entry_dir)).await?.map_err(|e| e.to_string())?;
         let pw = password.to_string();
-        if let Err(e) = next.core.run(|i| async move { i.unlock(&pw).await }).await {
+        let unlocked = next
+            .core
+            .run(move |i| async move {
+                i.unlock(&pw).await?;
+                if remember {
+                    i.enable_auto_unlock()?;
+                }
+                Ok(())
+            })
+            .await;
+        if let Err(e) = unlocked {
             next.core.shutdown().await;
             return Err(e.to_string());
         }
@@ -588,14 +627,69 @@ impl Profiles {
         Ok(())
     }
 
+    /// Opens a profile whose "remember the password on this device" is on, without a password.
+    /// "password_required" when it is off (or its saved key no longer opens the data; the
+    /// option is then off); nothing changes in that case.
+    pub async fn open_auto(&self, id: &str) -> Result<(), String> {
+        let _guard = self.switching.lock().await;
+        let Some(entry) = self.store.read(|r| r.get(id).cloned()) else {
+            return Err(err("not_found", "no such profile on this device"));
+        };
+        if self.current().rel == entry.dir {
+            return Ok(());
+        }
+        if !local_lock::has_auto_unlock(&self.base.join(&entry.dir)) {
+            return Err(err("password_required", "this account asks for its password"));
+        }
+        let (base, store, sink) = (self.base.clone(), self.store.clone(), self.sink.clone());
+        let (server, platform, entry_id, entry_dir) = (self.default_server_url.clone(), self.platform.clone(), entry.id.clone(), entry.dir.clone());
+        let next = blocking(move || start_core(&base, &store, &sink, &server, &platform, entry_id, entry_dir)).await?.map_err(|e| e.to_string())?;
+        match next.core.run(|i| async move { i.try_auto_unlock().await }).await {
+            Ok(true) => {}
+            Ok(false) => {
+                next.core.shutdown().await;
+                return Err(err("password_required", "this account asks for its password"));
+            }
+            Err(e) => {
+                next.core.shutdown().await;
+                return Err(e.to_string());
+            }
+        }
+        self.swap(next.clone()).await;
+        self.refresh(&next, true).await;
+        Ok(())
+    }
+
+    /// App start: opens the most recently used listed profile whose "remember the password on
+    /// this device" is on, if any. Runs once per run of the app (later calls do nothing), so
+    /// "Switch account" still lands on the start screen. Returns whether a profile was opened.
+    pub async fn auto_open_at_start(&self) -> bool {
+        if self.auto_tried.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        let mut candidates: Vec<(i64, String, String)> =
+            self.store.read(|r| r.profiles.iter().filter(|p| !p.hidden).map(|p| (p.last_used, p.id.clone(), p.dir.clone())).collect());
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, id, dir) in candidates {
+            if !local_lock::has_auto_unlock(&self.base.join(&dir)) {
+                continue;
+            }
+            match self.open_auto(&id).await {
+                Ok(()) => return true,
+                Err(e) => log::warn!("profile {id}: could not open it without the password: {e}"),
+            }
+        }
+        false
+    }
+
     /// Opens the profile of a full account number (also hidden ones). A number with no profile
     /// here gets the same answer as a wrong password.
-    pub async fn open_by_number(&self, number: &str, password: &str) -> Result<(), String> {
+    pub async fn open_by_number(&self, number: &str, password: &str, remember: bool) -> Result<(), String> {
         let wrong = || err("invalid_password", "wrong account number or password");
         let Some(number) = crate::util::normalize_number(number) else { return Err(wrong()) };
         let snapshot = self.store.read(Registry::clone);
         let id = blocking(move || snapshot.find_by_number(&number)).await.ok().flatten().ok_or_else(wrong)?;
-        self.open(&id, password).await
+        self.open(&id, password, remember).await
     }
 
     /// Back to the start screen on a new blank profile. The profile that was active stays on
@@ -783,12 +877,17 @@ pub struct CurrentProfile {
 pub struct OpenReq {
     pub id: String,
     pub password: String,
+    /// Also turn on "remember the password on this device" for this profile.
+    #[serde(default)]
+    pub remember: bool,
 }
 
 #[derive(Deserialize)]
 pub struct OpenByNumberReq {
     pub number: String,
     pub password: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 #[derive(Deserialize)]
@@ -957,10 +1056,10 @@ mod tests {
             assert!(first.core.run(|_| async move { Ok(()) }).await.is_err(), "previous core stopped");
             assert_eq!(profiles.list().len(), 1);
 
-            let wrong = profiles.open(&first.id, "nope").await.unwrap_err();
+            let wrong = profiles.open(&first.id, "nope", false).await.unwrap_err();
             assert!(wrong.starts_with("invalid_password"), "{wrong}");
             assert_eq!(profiles.current().rel, blank.rel, "unchanged after a wrong password");
-            profiles.open(&first.id, "pass word 1").await.unwrap();
+            profiles.open(&first.id, "pass word 1", false).await.unwrap();
             let opened = profiles.current();
             assert_eq!(opened.rel, first.rel);
             assert_eq!(profiles.data_dir(), base.join(&first.rel));
@@ -974,6 +1073,68 @@ mod tests {
             assert!(!base.join(&first.rel).exists());
             assert!(profiles.list().is_empty());
             profiles.core().shutdown().await;
+        });
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// "Remember the password on this device": on with the password as proof, the profile
+    /// then opens at startup without it; off again, the password is required.
+    #[test]
+    fn remembered_profile_opens_without_password() {
+        let base = temp_base("auto");
+        let profiles = Profiles::start(base.clone(), String::new(), "test".into(), Arc::new(NoEvents)).unwrap();
+        block_on(async {
+            let first = profiles.current();
+            first.core.run(|i| async move { i.db.borrow().kv_set_json("marker", &7) }).await.unwrap();
+            first.core.run(|i| async move { i.lock_with_password("pass word 1").await }).await.unwrap();
+            profiles.store.update(|r| {
+                r.profiles.push(ProfileEntry { label: Some("Ana".into()), last_used: 1, ..entry(&first.id, &first.rel) });
+                true
+            });
+            // Off by default: nothing opens by itself, and opening without the password fails.
+            assert!(!profiles.list()[0].auto_unlock);
+            profiles.close().await.unwrap();
+            assert!(!profiles.auto_open_at_start().await);
+            let e = profiles.open_auto(&first.id).await.unwrap_err();
+            assert!(e.starts_with("password_required"), "{e}");
+            // Turned on while opening with the password.
+            profiles.open(&first.id, "pass word 1", true).await.unwrap();
+            assert!(base.join(&first.rel).join(local_lock::AUTO_FILE).exists());
+            assert!(profiles.list()[0].auto_unlock);
+            let state = profiles.invoke("get_state", Value::Null).await.unwrap();
+            assert_eq!(state["auto_unlock"], true);
+            // Next app start: a fresh Profiles on the same directory opens it without a password.
+            profiles.core().shutdown().await;
+            let again = Profiles::start(base.clone(), String::new(), "test".into(), Arc::new(NoEvents)).unwrap();
+            assert!(again.auto_open_at_start().await);
+            assert!(!again.auto_open_at_start().await, "only once per run");
+            let opened = again.current();
+            assert_eq!(opened.rel, first.rel);
+            let marker: Option<i32> = opened.core.run(|i| async move { i.db.borrow().kv_get_json("marker") }).await.unwrap();
+            assert_eq!(marker, Some(7));
+            // Turning it off needs no password; turning it on needs the right one.
+            again.invoke("set_auto_unlock", serde_json::json!({ "enabled": false })).await.unwrap();
+            assert!(!base.join(&first.rel).join(local_lock::AUTO_FILE).exists());
+            let e = again.invoke("set_auto_unlock", serde_json::json!({ "enabled": true, "password": "nope" })).await.unwrap_err();
+            assert!(e.starts_with("invalid_password"), "{e}");
+            let e = again.invoke("set_auto_unlock", serde_json::json!({ "enabled": true })).await.unwrap_err();
+            assert!(e.starts_with("invalid_password"), "{e}");
+            again.invoke("set_auto_unlock", serde_json::json!({ "enabled": true, "password": "pass word 1" })).await.unwrap();
+            assert!(base.join(&first.rel).join(local_lock::AUTO_FILE).exists());
+            again.invoke("set_auto_unlock", serde_json::json!({ "enabled": false })).await.unwrap();
+            // Off: the next start lands on the start screen and the password is asked again.
+            again.close().await.unwrap();
+            let e = again.open_auto(&first.id).await.unwrap_err();
+            assert!(e.starts_with("password_required"), "{e}");
+            again.core().shutdown().await;
+            let third = Profiles::start(base.clone(), String::new(), "test".into(), Arc::new(NoEvents)).unwrap();
+            assert!(!third.auto_open_at_start().await);
+            // A stale saved key (the data was re-keyed) is dropped instead of opening anything.
+            std::fs::write(base.join(&first.rel).join(local_lock::AUTO_FILE), serde_json::json!({ "v": 1, "key": crate::crypto::b64(vec![9u8; 32]) }).to_string()).unwrap();
+            let e = third.open_auto(&first.id).await.unwrap_err();
+            assert!(e.starts_with("password_required"), "{e}");
+            assert!(!base.join(&first.rel).join(local_lock::AUTO_FILE).exists());
+            third.core().shutdown().await;
         });
         let _ = std::fs::remove_dir_all(&base);
     }

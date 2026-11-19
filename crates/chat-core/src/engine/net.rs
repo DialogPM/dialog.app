@@ -1,9 +1,10 @@
 //! WebSocket connection, reconnection, presence and server events.
 
+use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -52,6 +53,8 @@ enum ServerEvent {
 const BG_GRACE: Duration = Duration::from_secs(30);
 const BG_PUSH_WINDOW: Duration = Duration::from_secs(20);
 const BG_MESSAGE_WINDOW: Duration = Duration::from_secs(10);
+/// Bound on the WebSocket handshake (TCP connect, TLS and upgrade together).
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 enum SocketEnd {
     Closed,
@@ -185,10 +188,12 @@ impl Inner {
             "Authorization",
             format!("Bearer {token}").parse().map_err(|_| CoreError::internal("bad token"))?,
         );
-        let ws = match tokio_tungstenite::connect_async(req).await {
-            Ok((ws, _)) => ws,
-            Err(tungstenite::Error::Http(resp)) if resp.status() == 401 => return Ok(SocketEnd::Unauthorized),
-            Err(e) => return Err(CoreError::network(e.to_string())),
+        let connect = tokio::time::timeout(WS_CONNECT_TIMEOUT, tokio_tungstenite::connect_async(req));
+        let ws = match connect.await {
+            Ok(Ok((ws, _))) => ws,
+            Ok(Err(tungstenite::Error::Http(resp))) if resp.status() == 401 => return Ok(SocketEnd::Unauthorized),
+            Ok(Err(e)) => return Err(CoreError::network(e.to_string())),
+            Err(_) => return Err(CoreError::network("websocket connect timed out")),
         };
         let (mut sink, mut stream) = ws.split();
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -267,12 +272,20 @@ impl Inner {
                 ServerFrame::Envelope { envelope } => {
                     self.extend_background(BG_MESSAGE_WINDOW);
                     let id = envelope.id.clone();
-                    if let Err(e) = self.clone().handle_envelope(envelope).await {
-                        log::warn!("envelope {id}: {e}");
-                        if e.is_network() {
-                            // Keep it queued on the server; it will be redelivered.
-                            continue;
+                    // A panic while handling one envelope must not end this loop (it is started
+                    // once per session): the envelope is dropped and acknowledged, so the same
+                    // bytes cannot take the connection down again at every start.
+                    let handled = AssertUnwindSafe(self.clone().handle_envelope(envelope)).catch_unwind().await;
+                    match handled {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            log::warn!("envelope {id}: {e}");
+                            if e.is_network() {
+                                // Keep it queued on the server; it will be redelivered.
+                                continue;
+                            }
                         }
+                        Err(_) => log::error!("envelope {id}: panic while handling it; dropped"),
                     }
                     self.ws_send(json!({ "type": "ack", "id": id }));
                 }

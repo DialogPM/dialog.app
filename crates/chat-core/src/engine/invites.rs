@@ -50,6 +50,11 @@ struct InviteBlob {
 struct Intro {
     name: String,
     profile_key: String,
+    /// The requester's own account id: the server pairs intros with account ids when it lists
+    /// requests, so an admin only takes a profile key from an intro that names its account.
+    /// Absent in intros of older clients (their name is shown, their key is not stored).
+    #[serde(default)]
+    account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -237,7 +242,7 @@ impl Inner {
         let (_, blob, token) = self.lookup_invite(&secret).await?;
         let (_, blob_key) = crypto::invite_keys(&secret);
         let s = self.session()?;
-        let intro = Intro { name: self.get_profile()?.name, profile_key: self.profile_key_b64()? };
+        let intro = Intro { name: self.get_profile()?.name, profile_key: self.profile_key_b64()?, account_id: Some(self.me()?) };
         let intro = crypto::aead_seal(&blob_key, &serde_json::to_vec(&intro)?, INTRO_AAD)?;
         let res: serde_json::Value =
             s.api.post("/v1/invites/join", &json!({ "token": b64(token), "intro": b64(intro) })).await?;
@@ -327,8 +332,12 @@ impl Inner {
                     .and_then(|p| serde_json::from_slice(&p).ok()),
                 _ => None,
             };
+            // An intro naming another account than the one the server attached it to is
+            // discarded entirely (name included); one without an account id (older client)
+            // is shown but its profile key is not trusted for this account.
+            let intro = intro.filter(|i| i.account_id.as_deref().is_none_or(|a| a == r.account_id));
             let _ = self.ensure_contact(&r.account_id).await;
-            if let Some(i) = &intro {
+            if let Some(i) = intro.as_ref().filter(|i| i.account_id.is_some()) {
                 self.update_profile_key(&r.account_id, &i.profile_key).await;
             }
             let c = self.contact_model(&r.account_id)?;
