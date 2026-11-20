@@ -122,24 +122,40 @@ List<Seg> _leaves(String s, List<_Token> tokens) {
 /// Inline formatting of one piece without code spans.
 List<Seg> _inline(String s, List<_Token> tokens, int depth) {
   if (depth > 4) return _leaves(s, tokens);
+  final out = <Seg>[];
+  // Start of the text not yet emitted. The spans of one piece are found in a loop: only the
+  // nesting recurses (bounded by `depth`), so a long message cannot exhaust the stack.
+  var from = 0;
+  // Per marker: up to where no closing marker exists (found by an earlier, failed search).
+  final noCloseBefore = <String, int>{};
   for (var i = 0; i < s.length; i++) {
     final kind = _marks[s[i]];
     if (kind == null) continue;
     // Opening marker: at the start or after a non-word character, followed by a non-space.
     if (_isWord(_at(s, i - 1)) || _isSpace(_at(s, i + 1)) || i + 1 >= s.length || s[i + 1] == s[i]) continue;
-    for (var j = i + 2; j < s.length; j++) {
+    if (i + 2 < (noCloseBefore[s[i]] ?? 0)) continue;
+    var j = i + 2;
+    var close = -1;
+    for (; j < s.length; j++) {
       if (s[j] == '\n') break;
       // Closing marker: after a non-space, followed by the end or a non-word character.
       if (s[j] == s[i] && !_isSpace(_at(s, j - 1)) && !_isWord(_at(s, j + 1))) {
-        return [
-          ..._leaves(s.substring(0, i), tokens),
-          Seg(kind, children: _inline(s.substring(i + 1, j), tokens, depth + 1)),
-          ..._inline(s.substring(j + 1), tokens, depth),
-        ];
+        close = j;
+        break;
       }
     }
+    if (close < 0) {
+      noCloseBefore[s[i]] = j;
+      continue;
+    }
+    out
+      ..addAll(_leaves(s.substring(from, i), tokens))
+      ..add(Seg(kind, children: _inline(s.substring(i + 1, close), tokens, depth + 1)));
+    from = close + 1;
+    i = close;
   }
-  return _leaves(s, tokens);
+  out.addAll(_leaves(s.substring(from), tokens));
+  return out;
 }
 
 /// Parses a message text into display segments.

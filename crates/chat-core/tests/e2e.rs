@@ -1150,6 +1150,7 @@ async fn media_at_rest() {
     assert!(chat_core::media_crypto::is_encrypted(&std::fs::read(p.avatar_path.unwrap()).unwrap()));
 
     // 3. Disappearing messages take their files with them, on both sides.
+    let ana_paths: Vec<String> = sent.attachments.iter().map(|a| a.local_path.clone().unwrap()).collect();
     let patch: ConversationSettingsPatch = serde_json::from_value(serde_json::json!({ "conversation_id": conv.id, "disappearing_seconds": 4 })).unwrap();
     ana.core.run(move |i| async move { i.set_conversation_settings(patch).await }).await.unwrap();
     let sent = send_files("expiring", &conv.id).await.unwrap();
@@ -1171,8 +1172,9 @@ async fn media_at_rest() {
         }
     }
     assert!(gone, "expired message files still on disk: {files:?}");
-    // The timer applies to the messages already in the chat too: the earlier files went as well.
-    assert!(bob_paths.iter().all(|p| !std::path::Path::new(p).exists()), "earlier messages kept their files");
+    // The timer is for messages sent after it was set: the earlier files stay, on both sides.
+    assert!(ana_paths.iter().all(|p| std::path::Path::new(p).exists()), "the timer deleted earlier files of the one who set it");
+    assert!(bob_paths.iter().all(|p| std::path::Path::new(p).exists()), "a peer's timer deleted our earlier files");
     let patch: ConversationSettingsPatch = serde_json::from_value(serde_json::json!({ "conversation_id": conv.id, "disappearing_seconds": 0 })).unwrap();
     ana.core.run(move |i| async move { i.set_conversation_settings(patch).await }).await.unwrap();
     // Files of a message sent with the timer off, for the sweep checks below.

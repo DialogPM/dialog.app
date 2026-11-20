@@ -39,9 +39,21 @@ Conventions
   "phone_verification_enabled": true,
   "max_attachment_bytes": 104857600,
   "max_devices": 6,
-  "kt_public_key": "base64 (32-byte Ed25519 key)"
+  "kt_public_key": "base64 (32-byte Ed25519 key)",
+  "client_versions": {
+    "desktop": {"latest": "0.1.2", "min": "0.1.0"},
+    "android": {"latest": "1.0.1"},
+    "ios": {"latest": "1.0.1"}
+  }
 }
 ```
+
+`client_versions` (server-rs) is what the operator announces in the admin settings, per platform
+(`desktop`, `android`, `ios`), as plain `major.minor.patch` versions; the object, a platform or
+a key is absent when nothing is set. An app older than `latest` offers the update at start (the
+user may postpone it), one older than `min` requires it. The server only announces numbers: the
+apps open their own built-in store or download link and ignore anything that is not a plain
+version.
 
 `kt_public_key` (server-rs) signs the key transparency tree heads (§19); clients pin it on first
 contact and refuse a change.
@@ -278,7 +290,8 @@ appended (duplicate ids replace). Max 200 one-time keys per list per request.
 For `*` all devices are returned (when fetching one's own account, the requesting device is
 excluded). One-time pre-keys are consumed (deleted) atomically. If no one-time kyber key is
 left, the last-resort kyber key is returned. Devices without an uploaded signed pre-key are
-skipped.
+skipped. Rate limited per (fetcher, target) and per target (section 12), since every fetch
+consumes the target's one-time keys.
 
 ```json
 {
@@ -303,7 +316,8 @@ skipped.
 `GET /v1/directory/number/{number}` (auth, rate limited 60/min per account)
 → `{ "account_id": "...", "number": "...", "identity_key": "..." }` or `404`.
 
-`GET /v1/directory/account/{account_id}` (auth) → same shape, `404` for unknown/deleted.
+`GET /v1/directory/account/{account_id}` (auth, same 60 / min budget) → same shape, `404` for
+unknown/deleted.
 
 `POST /v1/directory/phones` (auth, rate limited) — contact discovery:
 
@@ -365,6 +379,9 @@ Rules
 * If a `registration_id` does not match the device's current one: `410` with
   `{"error":"gone","stale_devices":[..]}`.
 * Destination unknown/deleted → `404`.
+* A destination device whose queue already holds 10 000 envelopes → `507` with
+  `{"error":"queue_full","full_devices":[..]}` (nothing is stored); stored content also counts
+  against the sender's budget (section 12).
 * If the destination has **blocked**… (blocking is client-side only; the server always delivers).
 * `online = true` means ephemeral (typing indicators): deliver only to currently connected
   devices, never store.
@@ -584,7 +601,9 @@ the account can read them. Used to give newly linked devices the chat history.
 
 Upsert by `(account, id)`; `data = null` marks the record deleted (tombstone kept).
 Every write assigns a new, strictly increasing `seq` (global counter).
-Max 500 records per request. Per-account quota (default 1 GiB) → `413`.
+Max 500 records per request. Per-account quota (default 1 GiB) → `413`; every record is
+charged 128 bytes plus its id on top of its data (tombstones included), and an account may hold
+at most 100 000 records (`413`).
 Response `{ "seq": 12345 }` (highest assigned).
 
 `GET /v1/vault/records?since=0&limit=500` (auth)
@@ -604,13 +623,20 @@ Records with `seq > since`, ordered by `seq`.
 | register | 5 / hour / IP |
 | prelogin, login | 20 / 10 min / IP and 10 / 10 min / number |
 | recover (challenge + recover) | 10 / hour / IP |
-| directory number lookup | 60 / min / account |
+| directory lookups (by number, by username, by account id) | 60 / min / account, one shared budget |
 | directory phones | 10 / hour / account |
 | phone code send | 5 / hour / account and 3 / hour / destination number |
 | two-step codes (login, enable, disable) | 10 / 10 min and 30 / day / account |
 | password checks of a logged-in account (change password, delete account) | 10 / 10 min / account |
 | sealed sender delivery | 600 / min / IP; anonymous pre-key fetch 60 / min / IP |
-| key transparency (`/v1/kt/*`) | 600 / min / IP |
+| pre-key bundle fetch (`GET /v1/keys/{account}/{device}`, sealed variant) | 20 / hour per (fetching account, target account) and 1 000 / hour per target account (all fetchers) |
+| call offers (sends with `call_id`) | 10 / min per sender and 3 / min per (sender, destination); sender = account, or IP for sealed sends. Pushes: one call push per device per 30 s, whatever the call id |
+| group v2 sends (`PUT /v2/groups/messages`) | 20 000 envelopes (recipient devices) / 10 min / account |
+| `POST /v2/groups/devices` | 60 / min / account |
+| key transparency (`/v1/kt/*`) | 600 / min / IP; `/v1/kt/entries` additionally 120 pages / 10 min / IP |
+| stored message content (1:1, group v1 and v2 sends with `online: false`) | 1 GiB / 10 min per sender (account, or IP for sealed sends) |
+| queued envelopes per device | at most 10 000; a 1:1 send to a fuller queue gets `507 queue_full {"full_devices": [id]}`, group sends skip those devices |
+| `PATCH /v2/groups` | 60 / min per group |
 | device-linking sessions | 20 / 10 min / IP, at most 10 000 open at once |
 | device revocation checks | 60 / 10 min / IP |
 | attachment uploads | `CHATAPP_ATTACHMENT_DAILY_BYTES` per account and 24 h (`429 quota_exceeded`) |
@@ -706,7 +732,14 @@ opaque push tag. The app then connects, fetches and decrypts locally. Setup: doc
 Call offers: the caller's client adds `"call_id": "<call id>"` to the send request of an
 incoming-call offer (`PUT /v1/messages/{account}` and the sealed-sender variant; the content
 stays encrypted). Devices of the callee that need a push then get a call push instead of a
-message push.
+message push. Call offers are rate limited per sender and per (sender, callee) (section 12),
+and a device gets at most one call push per 30 s regardless of the call id (a second offer in
+that window reaches the app through its socket once the first push woke it).
+
+Call signalling that follows an offer (ICE candidates, answers, media state; not hangups): the
+client adds `"no_push": true` to the same send requests. The envelopes are stored and
+delivered as usual, but no push is sent for them: the offer's call push already wakes the
+device, and a "New message" alert for them would be wrong. Ignored together with `call_id`.
 
 FCM message sent by the server for new messages (`message` object of the HTTP v1 API):
 
@@ -733,7 +766,7 @@ Rules
 * Only for stored (non-`online`) envelopes, when the destination device has no open
   WebSocket or has not acknowledged the envelope within 10 s (3 s for a call offer).
 * At most one message push per device every 10 seconds (coalescing bursts); one call push
-  per device and call id.
+  per device every 30 seconds, whatever the call id.
 * Group envelopes and 1:1 envelopes are treated the same. Receipts/typing are not pushed
   (the client marks them by `content`… the server cannot tell them apart, so every stored
   envelope counts; the rate limit keeps it cheap).
@@ -743,7 +776,7 @@ Rules
 * Tokens are never logged.
 * Configuration: `CHATAPP_FCM_CREDENTIALS_FILE` (service account JSON with the
   `project_id`); `CHATAPP_APNS_KEY_FILE`, `CHATAPP_APNS_KEY_ID`, `CHATAPP_APNS_TEAM_ID`,
-  `CHATAPP_APNS_TOPIC` (the iOS app's bundle id + `.voip`), `CHATAPP_APNS_SANDBOX`. When
+  `CHATAPP_APNS_TOPIC` (default `pm.dialog.chat.voip`), `CHATAPP_APNS_SANDBOX`. When
   unset, push is disabled and `/v1/info` returns `"push_enabled": false` /
   `"voip_push_enabled": false`.
 
@@ -875,7 +908,7 @@ node hash = `SHA-256(0x01 || left || right)`, empty tree = `SHA-256("")`.
 | `GET /v1/kt/head?since=N` | `{"head": STH, "consistency": [hash] \| null}` — proof from size N (0 < N ≤ size) to the head; 400 when N > size |
 | `GET /v1/kt/proof/{account_id}?since=N` | `{"head": STH, "consistency": [...] \| null, "entry": {"index", "account_id", "identity_key", "created_at"}, "inclusion": [hash]}`; 404 when the account has no entry |
 | `GET /v1/kt/consistency?first=M&second=N` | `{"proof": [hash]}` for 0 < M ≤ N ≤ size (RFC 6962 PROOF), else 400 |
-| `GET /v1/kt/entries?start=S&end=E` | `{"entries": [entry]}` for indices [S, E), at most 1000 (self-monitoring) |
+| `GET /v1/kt/entries?start=S&end=E` | `{"entries": [entry]}` for indices [S, E), at most 1000 (self-monitoring); 120 pages / 10 min / IP on top of the shared limit |
 
 Every account gets an entry right after registration (and at startup / every 30 s for any
 account without one, which backfills existing databases). Entries are never removed, also not
@@ -926,13 +959,15 @@ when the group moved on. Actions (`type`):
 `members_access` is member), `remove_member {uid}` (admins; anyone for itself = leave),
 `modify_role {uid, role}` (admins), `remove_pending {uid}` (admins, or the invitee = decline),
 `accept_pending` (the invitee), `modify_attributes {blob}` (per `attributes_access`),
-`modify_settings {blob}` and `modify_access {attributes, members}` (admins). Leaving, accepting
+`modify_settings {blob}` and `modify_access {attributes, members}` (admins); at most one
+`modify_attributes` and one `modify_settings` per change. Leaving, accepting
 and declining must be the only action. When no admin remains the longest-standing member
 becomes one (`server_actions` of the change); when no member remains the group is deleted
 (`{"revision", "deleted": true}`). → `{"revision", "change", "signature"}`.
 
 `GET /v2/groups/changes?since=N` → `{"revision", "changes": [{"revision", "change", "signature"}],
-"more"}` (≤ 100, from the caller's join on). `change` is the JSON
+"more"}` (≤ 100, from the caller's join on; changes older than the earliest join or invitation
+revision of the current members are pruned by the maintenance job). `change` is the JSON
 `{"revision", "source": <caller ciphertext>, "actions", "server_actions"?}` and `signature` the
 zkgroup notary signature (`ServerSecretParams::sign`) over
 `"chatapp/group-v2/change\0" || GroupIdentifier || change`, verifiable with the public params.
@@ -941,7 +976,9 @@ zkgroup notary signature (`ServerSecretParams::sign`) over
 `{"devices": [{account_id, device_id, registration_id}]}` (the caller's current device left out).
 `PUT /v2/groups/messages {"group_id": "<client-side id>", "timestamp", "online", "content":
 "<b64 sender key message>", "recipients": [{account_id, device_id, registration_id}]}` →
-`{"server_timestamp"}`. Every device of each named account must be listed (409
+`{"server_timestamp"}`. Both are rate limited per account (section 12): the server cannot
+check that the sender and the recipients share a group, so the fan-out is budgeted instead.
+Every device of each named account must be listed (409
 `{"missing", "extra"}`, 410 `{"stale"}`, as for `PUT /v1/groups/{id}/messages`); envelopes are type 7
 with `group_id` set to the client-side id (derived from the master key; the server cannot link
 it to the GroupIdentifier).

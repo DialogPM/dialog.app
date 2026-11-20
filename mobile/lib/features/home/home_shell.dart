@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/globals.dart';
 import '../../services/battery.dart';
@@ -16,6 +17,7 @@ import '../../l10n/i18n.dart';
 import '../../state/actions.dart' show attempt;
 import '../../state/store.dart';
 import '../../theme/app_theme.dart';
+import '../../util/version.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
 import '../../widgets/ui.dart';
@@ -39,6 +41,59 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     setState(() => _qrOpen = true);
     await showQrSheet(context);
     if (mounted) setState(() => _qrOpen = false);
+  }
+
+  /// The version whose update prompt is on screen, and the one the user postponed ("Later"
+  /// holds until the app is closed, also across locking and switching accounts).
+  String? _updateShown;
+  static String? _updatePostponed;
+
+  /// Tells the user that a newer version exists (the server announces version numbers only,
+  /// the store links are built in). Older than the announced minimum: the prompt cannot be
+  /// closed. Same behaviour as the desktop's UpdatePrompt.
+  Future<void> _offerUpdate(String version, {required bool required}) async {
+    final url = Platform.isAndroid
+        ? kPlayStoreUrl
+        : (Platform.isIOS && kAppStoreId.isNotEmpty ? 'https://apps.apple.com/app/id$kAppStoreId' : kDownloadPage);
+    Future<void> open() => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    final update = await showDialog<bool>(
+      context: context,
+      barrierDismissible: !required,
+      builder: (ctx) => PopScope(
+        canPop: !required,
+        child: Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 26, 22, 18),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text(ctx.t(required ? 'update.requiredTitle' : 'update.title'),
+                    textAlign: TextAlign.center, style: ts(19, weight: 700, color: ctx.tk.ink)),
+                const SizedBox(height: 10),
+                Text(ctx.t(required ? 'update.requiredBody' : 'update.body', args: {'version': version, 'current': kAppVersion}),
+                    textAlign: TextAlign.center, style: ts(14, color: ctx.tk.muted, height: 1.45)),
+                const SizedBox(height: 20),
+                Btn(
+                  label: ctx.t('update.now'),
+                  kind: BtnKind.primary,
+                  height: 46,
+                  // A required update keeps the prompt up: there is nothing to go back to.
+                  onPressed: () => required ? unawaited(open()) : Navigator.of(ctx).pop(true),
+                ),
+                if (!required) ...[
+                  const SizedBox(height: 6),
+                  Btn(label: ctx.t('update.later'), kind: BtnKind.secondary, height: 42, onPressed: () => Navigator.of(ctx).pop(false)),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+    _updateShown = null;
+    _updatePostponed = version;
+    if (update == true) await open();
   }
 
   bool _askedLocalPassword = false;
@@ -114,6 +169,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           danger: false,
         );
         if (change && mounted) setState(() => _tab = 1);
+      });
+    }
+    // A newer version of the app is announced by the server: once per run, or until updated
+    // when the running version is below the announced minimum.
+    final server = ref.watch(storeProvider.select((s) => s.serverInfo));
+    final mustUpdate = isOlderVersion(kAppVersion, server?.clientMin);
+    final newer = isOlderVersion(kAppVersion, server?.clientLatest) ? server?.clientLatest : (mustUpdate ? server?.clientMin : null);
+    if (newer != null && _updateShown == null && (mustUpdate || _updatePostponed != newer) && isMobilePlatform) {
+      _updateShown = newer;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_offerUpdate(newer, required: mustUpdate));
       });
     }
     if (!_checkedBattery && !outdated && !weak) {

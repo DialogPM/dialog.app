@@ -64,10 +64,17 @@ impl Inner {
     }
 
     pub(super) fn set_attested(&self, group_id: &str, a: &Attested) -> Result<()> {
-        if self.attested(group_id).as_ref() == Some(a) {
+        let before = self.attested(group_id);
+        if before.as_ref() == Some(a) {
             return Ok(());
         }
         self.db.borrow().kv_set_json(&key(group_id), a)?;
+        // Someone left the attested list: our next messages use a new sender key chain, given
+        // to attested members only. The server's list is not what decides this (it could keep
+        // a removed member listed so that nobody rotates).
+        if before.is_some_and(|b| b.members.keys().any(|m| !a.is_member(m))) {
+            self.rotate_distribution(group_id)?;
+        }
         // Our other devices (and newly linked ones) share the list through the vault.
         self.vault_put_group(group_id);
         Ok(())

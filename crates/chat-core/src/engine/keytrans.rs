@@ -13,7 +13,9 @@
 //! 4. gossip: every data message carries our latest head; a contact's head that is not
 //!    consistent with ours (same size and another root, or no valid consistency proof) is a
 //!    split view, raised as an alert with both signed heads as evidence;
-//! 5. verify, in the background, every identity we pinned from an incoming first message.
+//! 5. verify, in the background, every identity we pinned from an incoming first message; an
+//!    identity not verified yet is verified before anything is sent to it, and one the log
+//!    contradicts gets nothing at all.
 //!
 //! State lives in the kv table (per device, never synced).
 
@@ -316,17 +318,17 @@ impl Inner {
         }
     }
 
-    /// Before the first session with an account: its key must be the one in the log (when the
-    /// server has a log). Already verified keys are not fetched again.
+    /// Before anything is encrypted for an account: its key must be the one in the log (when the
+    /// server has a log). Only a key verified earlier is not fetched again; a pinned one is not
+    /// enough, since an identity pinned from an incoming first message was never checked.
     pub(super) async fn kt_require(&self, account_id: &str, identity_key: &[u8]) -> Result<()> {
         if account_id == self.me()? {
             return Ok(());
         }
-        if self.kt_key().is_none() && !self.kt_setup().await.unwrap_or(false) {
-            return Ok(()); // a server without key transparency
-        }
-        if self.kt_pinned(account_id)?.is_some() {
-            // Verified when it was pinned (or by the sweep); libsignal refuses any other key.
+        // Not knowing yet whether the server has a log is not a reason to skip the check. A
+        // server that never published a key has none (trust on first use only); a key pinned
+        // once stays, whatever /v1/info says later.
+        if self.kt_key().is_none() && !self.kt_setup().await? {
             return Ok(());
         }
         if let Some(r) = self.kt_record(account_id) {
@@ -334,7 +336,23 @@ impl Inner {
                 return Ok(());
             }
         }
+        // Unchecked, or found not to be in the log: (again) ask the log. A mismatch is an
+        // error, so nothing is encrypted for that key.
         self.kt_verify_contact(account_id, identity_key).await
+    }
+
+    /// `kt_require` for the identity we pinned for `account_id`, if any (without one, the first
+    /// session checks the key the server serves). Called for every message, so it does not ask
+    /// the server whether it has a log: until `kt_loop` pinned its key there is nothing to check
+    /// against, and pinned identities are checked by the first message sent after that.
+    pub(super) async fn kt_require_pinned(&self, account_id: &str) -> Result<()> {
+        if self.kt_key().is_none() {
+            return Ok(());
+        }
+        match self.kt_pinned(account_id)? {
+            Some(key) => self.kt_require(account_id, &key).await,
+            None => Ok(()),
+        }
     }
 
     /// Self-check: our entry holds our key, and no entry of the log holds another key for us.

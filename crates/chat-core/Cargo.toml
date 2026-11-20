@@ -52,3 +52,9 @@ sha1 = "0.10"
 [[test]]
 name = "e2e_media_retention"
 required-features = ["insecure-test-hooks"]
+
+# Moves the clock libsignal judges sessions by (engine/send.rs).
+[[test]]
+name = "e2e_stale_session"
+required-features = ["insecure-test-hooks"]
+

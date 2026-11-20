@@ -380,8 +380,12 @@ async fn profile_key_rotates_on_block() {
     let a = alice.register().await;
     let b = bob.register().await;
     let c = carol.register().await;
+    let first_key = alice.profile_key().await;
     let alice2 = Client::new("alice2");
     alice2.login(&a.number).await;
+    // A sign-in with the password rotates the profile key once the restore is done
+    // (engine/vault.rs): wait for that one, so that the rotation below is the block's.
+    poll("rotation after the sign-in", || async { alice.profile_key().await != first_key && alice2.profile_key().await == alice.profile_key().await }).await;
     alice.set_name("Alice").await;
 
     // Bob and Carol are Alice's contacts and have her profile key.

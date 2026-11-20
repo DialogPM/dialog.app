@@ -1,5 +1,6 @@
-//! Disappearing messages apply to the whole conversation: turning the timer on also expires
-//! the messages already there (each counted from when it was sent), on both sides.
+//! The disappearing timer of a chat is for the messages sent after it was set, on both sides.
+//! Messages already in the chat keep what they were sent with (no timer, or their own
+//! deadline): neither side can make the existing history disappear by changing the timer.
 //!
 //! `CHATAPP_E2E_SERVER=http://127.0.0.1:8081 cargo test -p chat-core --test e2e_disappearing`
 
@@ -66,7 +67,7 @@ async fn send(c: &Client, conv: &str, text: &str) -> Message {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn timer_also_expires_existing_messages() {
+async fn timer_applies_to_new_messages_only() {
     if server().is_empty() {
         eprintln!("CHATAPP_E2E_SERVER not set, skipping");
         return;
@@ -93,22 +94,26 @@ async fn timer_also_expires_existing_messages() {
     alice.wait("old reply", |n, v| n == "message" && v["message"]["text"] == "old reply").await;
     assert!(old.expires_at.is_none() && reply.expires_at.is_none());
 
-    // Timer of 2 s: everything already older than that goes at once, on both sides.
+    // Timer of 2 s, set by Alice: only messages sent from now on follow it, on both sides.
     tokio::time::sleep(Duration::from_millis(2500)).await;
     let patch: ConversationSettingsPatch =
         serde_json::from_value(json!({ "conversation_id": conv, "disappearing_seconds": 2 })).unwrap();
     alice.core.run(move |i| async move { i.set_conversation_settings(patch).await }).await.unwrap();
-    let (oid, rid) = (old.id.clone(), reply.id.clone());
-    alice.wait("old message gone (alice)", move |n, v| n == "message_deleted" && v["message_id"] == oid.as_str()).await;
-    let rid2 = rid.clone();
-    alice.wait("reply gone (alice)", move |n, v| n == "message_deleted" && v["message_id"] == rid2.as_str()).await;
-    let oid = old.id.clone();
-    bob.wait("old message gone (bob)", move |n, v| n == "message_deleted" && v["message_id"] == oid.as_str()).await;
-    bob.wait("reply gone (bob)", move |n, v| n == "message_deleted" && v["message_id"] == rid.as_str()).await;
-    assert!(alice.message(&old.id).await.is_none(), "the row is deleted, not hidden");
-    assert!(bob.message(&reply.id).await.is_none(), "the row is deleted, not hidden");
-
-    // New messages follow the timer as before.
     let fresh = send(&alice, &conv, "fresh").await;
     assert!(fresh.expires_at.is_some());
+    bob.wait("fresh", |n, v| n == "message" && v["message"]["text"] == "fresh").await;
+    let again = send(&bob, &bob_conv, "bob's fresh").await;
+    assert!(again.expires_at.is_some(), "bob took the timer for new messages");
+    let (fid, aid) = (fresh.id.clone(), again.id.clone());
+    alice.wait("fresh gone (alice)", move |n, v| n == "message_deleted" && v["message_id"] == fid.as_str()).await;
+    bob.wait("bob's fresh gone (bob)", move |n, v| n == "message_deleted" && v["message_id"] == aid.as_str()).await;
+    assert!(alice.message(&fresh.id).await.is_none(), "the row is deleted, not hidden");
+
+    // The messages from before the timer are still there, for the one who set it and for the peer.
+    for (who, c) in [("alice", &alice), ("bob", &bob)] {
+        for id in [&old.id, &reply.id] {
+            let m = c.message(id).await;
+            assert!(m.as_ref().is_some_and(|m| m.expires_at.is_none()), "{who}: a message from before the timer was touched");
+        }
+    }
 }

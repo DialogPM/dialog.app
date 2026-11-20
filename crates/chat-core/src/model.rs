@@ -11,6 +11,18 @@ pub struct ServerInfo {
     pub phone_verification_enabled: bool,
     pub max_attachment_bytes: i64,
     pub max_devices: i64,
+    /// The newest version of this app (for this platform) the server announces: the UI offers
+    /// the update when its own version is older. Only ever a version number: where to get the
+    /// update is built into the app, never taken from the server.
+    pub client_latest: Option<String>,
+    /// Versions older than this must update before the app can be used.
+    pub client_min: Option<String>,
+}
+
+/// Whether `v` is a plain "major.minor.patch" version (digits only, at most 4 per part).
+pub fn is_plain_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|c| c.is_ascii_digit()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

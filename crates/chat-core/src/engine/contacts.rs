@@ -266,6 +266,19 @@ impl Inner {
     }
 
     pub fn set_verified(&self, account_id: &str, verified: bool) -> Result<Contact> {
+        // "Verified" is about a key: the pinned one, which never changes (store.rs). Before one is
+        // pinned (the safety number screen pins it) there is nothing it could refer to.
+        if verified && account_id != self.me()? {
+            let pinned: Option<i64> = self
+                .db
+                .borrow()
+                .conn
+                .query_row("SELECT 1 FROM identities WHERE account_id = ?1", [account_id], |r| r.get(0))
+                .optional()?;
+            if pinned.is_none() {
+                return Err(CoreError::invalid("no key of this contact to verify yet"));
+            }
+        }
         self.db.borrow().conn.execute(
             "UPDATE contacts SET verified = ?2, updated_at = ?3 WHERE account_id = ?1",
             params![account_id, verified, now_ms()],
@@ -323,8 +336,22 @@ impl Inner {
         let remote = match stored {
             Some(k) => IdentityKey::decode(&k)?,
             None => {
+                // No key exchanged yet: the directory only has the server's word for it. It must
+                // be the key the transparency log holds, and it is pinned, so that the number
+                // the user compares (and may mark as verified) is the key of every later session.
                 let e: DirectoryEntryDto = s.api.get(&format!("/v1/directory/account/{account_id}")).await?;
-                IdentityKey::decode(&unb64(&e.identity_key)?)?
+                let key = IdentityKey::decode(&unb64(&e.identity_key)?)?;
+                let raw = key.serialize();
+                if account_id != s.account.account_id {
+                    self.kt_require(account_id, &raw).await?;
+                    self.pin_identity(account_id, &raw)?;
+                    // Shared with our other devices like any pin (store.rs), when the contact exists.
+                    self.db.borrow().conn.execute(
+                        "INSERT OR IGNORE INTO vault_dirty (logical_id) SELECT 'contact:' || account_id FROM contacts WHERE account_id = ?1",
+                        [account_id],
+                    )?;
+                }
+                key
             }
         };
         let local_id = uuid::Uuid::parse_str(&s.account.account_id).map_err(|e| CoreError::internal(e.to_string()))?;

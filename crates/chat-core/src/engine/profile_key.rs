@@ -28,6 +28,9 @@ use crate::error::{CoreError, Result};
 
 const KEY_CURRENT: &str = "profile_key_rotated";
 const KEY_NEXT: &str = "profile_key_next";
+/// SHA-256 (base64) of the keys we rotated away from, newest last.
+const KEY_RETIRED: &str = "profile_key_retired";
+const MAX_RETIRED: usize = 64;
 
 impl Inner {
     /// Our current profile key.
@@ -69,6 +72,7 @@ impl Inner {
             }
         }
         self.publish_profile_with(&next).await?;
+        self.retire_profile_key(&self.profile_key()?, &next)?;
         {
             let db = self.db.borrow();
             db.kv_set(KEY_CURRENT, &next)?;
@@ -94,22 +98,47 @@ impl Inner {
         if key.len() != 32 {
             return Err(CoreError::invalid("invalid profile key"));
         }
-        self.set_rotated_profile_key(&key)?;
+        self.set_rotated_profile_key(&key, true)?;
         let me = self.me()?;
         self.fetch_profile(&me).await
     }
 
-    /// Stores a profile key rotated elsewhere (sync message or vault settings).
-    pub(super) fn set_rotated_profile_key(&self, key: &[u8]) -> Result<()> {
+    /// Stores a profile key rotated elsewhere. `ordered`: it came in a sync message from one of
+    /// our devices (Signal delivers those once and in order). The vault settings record is
+    /// not ordered: the server stores it and could hand out an old copy, so a key we already
+    /// rotated away from (after blocking someone who has it) is never taken back from there.
+    pub(super) fn set_rotated_profile_key(&self, key: &[u8], ordered: bool) -> Result<()> {
         let key = crypto::key32(key)?;
-        if self.profile_key()? == key {
+        let current = self.profile_key()?;
+        if current == key {
             return Ok(());
         }
+        if !ordered && self.retired_profile_keys()?.contains(&b64(crypto::sha256(&key))) {
+            log::warn!("ignoring a retired profile key from the vault");
+            return Ok(());
+        }
+        self.retire_profile_key(&current, &key)?;
         let db = self.db.borrow();
         db.kv_set(KEY_CURRENT, &key)?;
         // A rotation of our own still pending here would publish under another key.
         db.kv_delete(KEY_NEXT)?;
         Ok(())
+    }
+
+    fn retired_profile_keys(&self) -> Result<Vec<String>> {
+        Ok(self.db.borrow().kv_get_json(KEY_RETIRED)?.unwrap_or_default())
+    }
+
+    /// Remembers `old` as rotated away from, as `new` becomes the current key.
+    fn retire_profile_key(&self, old: &[u8; 32], new: &[u8; 32]) -> Result<()> {
+        let (old, new) = (b64(crypto::sha256(old)), b64(crypto::sha256(new)));
+        let mut retired = self.retired_profile_keys()?;
+        retired.retain(|k| *k != old && *k != new);
+        retired.push(old);
+        if retired.len() > MAX_RETIRED {
+            retired.drain(..retired.len() - MAX_RETIRED);
+        }
+        self.db.borrow().kv_set_json(KEY_RETIRED, &retired)
     }
 
     /// The rotated key for the vault settings record (None: still the derived one).

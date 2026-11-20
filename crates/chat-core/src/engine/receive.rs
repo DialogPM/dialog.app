@@ -51,6 +51,9 @@ impl Inner {
             log::warn!("dropping envelope {}: malformed source account id", env.id);
             return Ok(());
         }
+        // One spelling per account: the same id in capitals must not pass for another account
+        // (with no pinned identity, no block, not ourselves).
+        env.source_account.make_ascii_lowercase();
         if env.source_account != me && self.is_blocked(&env.source_account) {
             return Ok(());
         }
@@ -375,6 +378,7 @@ impl Inner {
                 self.vault_notify.notify_one();
                 Ok(())
             }
+            SyncMessage::VaultResend => self.vault_resend_all(),
             SyncMessage::ProfileUpdated => {
                 let me = self.me()?;
                 self.fetch_profile(&me).await
@@ -403,6 +407,11 @@ impl Inner {
         }
         match dm.group_id.clone() {
             Some(group_id) => {
+                // The id goes into request paths and queries: a group id is a UUID.
+                if !crate::util::is_id(&group_id) {
+                    log::warn!("dropping message with a malformed group id from {sender}");
+                    return Ok(());
+                }
                 // Group content only from attested members (also blocks removed members and
                 // strangers sending pairwise messages tagged with the group id).
                 if !outgoing && self.attested(&group_id).is_some() && !self.is_attested_member(&group_id, sender) {
@@ -510,7 +519,8 @@ impl Inner {
                 Some(dm.id.clone()),
                 dm.sent_at,
             )?;
-            self.expire_existing(conv_id, dm.expire_timer)?;
+            // The timer is for messages sent from now on. Those already here keep what they
+            // were sent with: nobody can make our history disappear by changing the timer.
             self.vault_put_conversation(conv_id);
             return Ok(());
         }

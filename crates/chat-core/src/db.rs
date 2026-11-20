@@ -239,6 +239,18 @@ UPDATE messages
  WHERE kind = 'system' AND expires_at IS NULL
    AND json_extract(system_json, '$.type') = 'call'
    AND (SELECT c.disappearing_seconds FROM conversations c WHERE c.id = messages.conversation_id) > 0;
+"#, r#"
+-- 16: the newest version of every vault record this device wrote or applied (engine/vault.rs).
+-- The server stores the vault and could hand out an older copy of a record: a copy below the
+-- version kept here is refused. `applied = 0`: a version another device vouched for when it
+-- linked this one, not received yet. `lid`: the logical id, to upload the record again.
+CREATE TABLE vault_versions (
+    record_id TEXT PRIMARY KEY,
+    n         INTEGER NOT NULL,
+    d         INTEGER NOT NULL,
+    lid       TEXT,
+    applied   INTEGER NOT NULL DEFAULT 1
+);
 "#];
 
 pub struct Db {

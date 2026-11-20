@@ -173,6 +173,9 @@ pub enum SyncMessage {
     ViewOnceOpened { sender: String, id: String },
     /// Our profile key was rotated on another device (base64; engine/profile_key.rs).
     ProfileKey { key: String },
+    /// A device of ours found the vault incomplete or rolled back (engine/vault.rs): upload
+    /// the records again.
+    VaultResend,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

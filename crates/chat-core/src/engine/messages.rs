@@ -986,24 +986,6 @@ impl Inner {
     }
 
     /// Deletes expired disappearing messages.
-    /// Applies a disappearing-messages timer to the messages already in the conversation too
-    /// (not only to new ones): each one expires `seconds` after it was sent, so messages older
-    /// than that go at once. Turning the timer off keeps the deadlines already set.
-    pub(super) fn expire_existing(&self, conv_id: &str, seconds: i64) -> Result<()> {
-        if seconds <= 0 {
-            return Ok(());
-        }
-        let changed = self.db.borrow().conn.execute(
-            "UPDATE messages SET expires_in = ?2, expires_at = sent_at + ?2 * 1000
-             WHERE conversation_id = ?1 AND deleted = 0 AND (expires_at IS NULL OR expires_at > sent_at + ?2 * 1000)",
-            params![conv_id, seconds],
-        )?;
-        if changed > 0 {
-            self.expiry_notify.notify_one();
-        }
-        Ok(())
-    }
-
     pub(super) async fn expiry_loop(self: Rc<Self>) {
         // The 30-day media retention runs here too: at start, then when due (retention.rs).
         let mut retention_due = 0;

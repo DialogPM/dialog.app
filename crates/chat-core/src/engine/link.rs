@@ -88,6 +88,10 @@ struct LinkPayload {
     account_id: String,
     number: String,
     server_url: String,
+    /// What the vault must contain at least (engine/vault.rs): the new device does not have
+    /// to take the server's word for it. Absent from devices of older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vault_floor: Option<super::vault::VaultFloor>,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +256,7 @@ impl Inner {
         let data: LinkPayload = serde_json::from_slice(&plain)?;
         let secret = AccountSecret(crypto::key32(&unb64(&data.account_secret)?)?);
         let keys = AccountKeys::derive(&secret)?;
+        *self.link_floor.borrow_mut() = data.vault_floor.clone();
         let registration_id = rand::rng().random_range(1..16380);
         let resp: LinkResp = ApiClient::new(&l.server_url, None)
             .post(
@@ -374,6 +379,7 @@ impl Inner {
             account_id: s.account.account_id.clone(),
             number: s.account.number.clone(),
             server_url: s.account.server_url.clone(),
+            vault_floor: self.vault_write_manifest().await,
         };
         let sealed = crypto::aead_seal(&link_key(&secret), &serde_json::to_vec(&payload)?, LINK_AAD)?;
         let _: serde_json::Value = s

@@ -119,6 +119,12 @@ enum SecurityChannel {
       }
       try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
       try? FileManager.default.setAttributes([.protectionKey: level], ofItemAtPath: path)
+      // Never in iCloud or computer backups (like Android's allowBackup="false"): with
+      // "remember on this phone" the database key lies next to the database (chat.db.auto).
+      var url = URL(fileURLWithPath: path, isDirectory: true)
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      try? url.setResourceValues(values)
       result(nil)
     default:
       result(FlutterMethodNotImplemented)

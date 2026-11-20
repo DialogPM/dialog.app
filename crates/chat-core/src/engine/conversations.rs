@@ -307,13 +307,13 @@ impl Inner {
     }
 
     /// Sets a direct conversation's timer and announces it to the peer (timer update and a
-    /// "disappearing_changed" system message); existing messages start expiring.
+    /// "disappearing_changed" system message). The timer is for messages sent from now on:
+    /// those already in the chat keep what they were sent with, here and on the other side.
     fn set_direct_timer(&self, row: &ConversationRow, d: i64) -> Result<()> {
         self.db.borrow().conn.execute("UPDATE conversations SET disappearing_seconds = ?2 WHERE id = ?1", params![row.id, d])?;
         let now = now_ms();
         let dm = DataMessage { id: new_id(), sent_at: now, expire_timer: d, timer_update: true, ..Default::default() };
         self.insert_system_message(&row.id, "disappearing_changed", Some(self.me()?), vec![], Some(d.to_string()), Some(dm.id.clone()), now)?;
-        self.expire_existing(&row.id, d)?;
         self.enqueue(&super::send::Job::Data { conversation_id: row.id.clone(), data: dm })
     }
 

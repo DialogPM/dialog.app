@@ -22,6 +22,8 @@ echo "==> build $BUILD_NUMBER (ultimul urcat: $LAST)"
 # --- Poarta de calitate ------------------------------------------------------
 # Un build urcat cu testele roșii nu se mai retrage decât cu altă versiune și încă un review.
 if [ "${SKIP_TESTS:-0}" != "1" ]; then
+  # Nucleul (chat-core, serverul, e2e pe server real) — aplicația mobilă rulează același cod.
+  ../scripts/check.sh --no-flutter || { echo "!! testele nucleului au picat — nu construiesc."; exit 1; }
   echo "==> flutter analyze"; flutter analyze lib || { echo "!! analyze a picat — nu construiesc."; exit 1; }
   echo "==> flutter test";    flutter test        || { echo "!! teste picate — nu construiesc."; exit 1; }
 else

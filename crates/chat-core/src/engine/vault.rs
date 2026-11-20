@@ -1,6 +1,23 @@
 //! Encrypted server vault: syncs contacts, group keys, conversation settings and (optionally)
 //! message history between the devices of an account. Records are encrypted with the vault
 //! key derived from the account secret; record ids are HMACs of logical ids.
+//!
+//! The server stores the vault and is not trusted with it: it cannot read or forge a record,
+//! but it could hand out an older copy, or one record in place of another. Against that:
+//! * every record carries a version `(n, d)`: a counter that only grows (one more than the
+//!   highest this device has seen, a Lamport clock) and the id of the device that wrote it.
+//!   Version and record id are authenticated with the content. A device keeps the newest
+//!   version of each record it wrote or applied (table `vault_versions`) and refuses anything
+//!   below it; it then uploads its own copy again, so the vault heals.
+//! * a device that links another one writes a manifest (the versions of every record except
+//!   messages) and sends its hash inside the link payload, end to end. The new device takes
+//!   those versions as the minimum before it applies anything, and asks for a new upload
+//!   when the server's vault falls short.
+//! * signing in with the password or the recovery phrase has no such anchor: the profile key
+//!   is rotated once the restore is done, so a key the server brought back is not kept.
+//! Two devices changing the same record: the higher version wins (the device id breaks a tie)
+//! and the per-record rules of `apply_record` still merge what they can (accepted chats,
+//! message edits and deletions, timestamps of settings).
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -21,8 +38,64 @@ use crate::model::*;
 const MAX_VAULT_PAGES_PER_PULL: usize = 200;
 use crate::util::now_ms;
 
+/// Records written before versions existed (no header; they count as version (0, 0)).
 const VAULT_AAD: &[u8] = b"chatapp-vault-v1";
+const VAULT_AAD_V2: &[u8] = b"chatapp-vault-v2";
+const BLOB_V2: u8 = 2;
+const HEADER_LEN: usize = 13;
 const BATCH: usize = 200;
+/// Entries per manifest record (a record holds at most 256 KiB).
+const MANIFEST_PART: usize = 2000;
+/// How long a newly linked device waits for the manifest before it goes on without one.
+const FLOOR_WAIT_MS: i64 = 120_000;
+/// A record the server returned older than known is uploaded again at most this often.
+const HEAL_EVERY_MS: i64 = 600_000;
+
+/// Version of a record: (counter, device id), compared in that order.
+type Version = (u64, u32);
+/// (record id, counter, device id)
+type ManifestEntry = (String, u64, u32);
+
+/// What a linking device vouches for: the manifest records and the hash of their content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultFloor {
+    pub parts: u32,
+    pub hash: String,
+}
+
+struct Known {
+    version: Version,
+    lid: Option<String>,
+    applied: bool,
+}
+
+fn aad_v2(record_id: &str, header: &[u8]) -> Vec<u8> {
+    [VAULT_AAD_V2, &[0u8], record_id.as_bytes(), &[0u8], header].concat()
+}
+
+/// `[2][n: u64 BE][d: u32 BE]` followed by the sealed content; the header and the record id
+/// are authenticated with it.
+fn seal_record(key: &[u8; 32], record_id: &str, version: Version, plain: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(HEADER_LEN + plain.len() + 28);
+    out.push(BLOB_V2);
+    out.extend_from_slice(&version.0.to_be_bytes());
+    out.extend_from_slice(&version.1.to_be_bytes());
+    let sealed = crypto::aead_seal(key, plain, &aad_v2(record_id, &out))?;
+    out.extend_from_slice(&sealed);
+    Ok(out)
+}
+
+fn open_record(key: &[u8; 32], record_id: &str, blob: &[u8]) -> Result<(Version, Vec<u8>)> {
+    if blob.len() > HEADER_LEN && blob[0] == BLOB_V2 {
+        let (header, sealed) = blob.split_at(HEADER_LEN);
+        if let Ok(plain) = crypto::aead_open(key, sealed, &aad_v2(record_id, header)) {
+            let n = u64::from_be_bytes(header[1..9].try_into().expect("8 bytes"));
+            let d = u32::from_be_bytes(header[9..13].try_into().expect("4 bytes"));
+            return Ok(((n, d), plain));
+        }
+    }
+    Ok(((0, 0), crypto::aead_open(key, blob, VAULT_AAD)?))
+}
 
 /// Where a conversation points to (stable across devices, unlike local conversation ids).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +163,28 @@ enum Record {
         accepted: bool,
     },
     Message(Box<VaultMessage>),
+    /// Versions of the records (messages aside) as a device knew them when it linked another.
+    Manifest {
+        part: u32,
+        entries: Vec<ManifestEntry>,
+    },
+}
+
+/// The logical id a record belongs under (its record id is derived from it).
+fn lid_of(rec: &Record) -> String {
+    let target = |t: &Target| match t {
+        Target::Peer { account_id } => format!("conv:peer:{account_id}"),
+        Target::Group { group_id } => format!("conv:group:{group_id}"),
+    };
+    match rec {
+        Record::Deleted { lid } => lid.clone(),
+        Record::Settings { .. } => "settings".into(),
+        Record::Contact { account_id, .. } => format!("contact:{account_id}"),
+        Record::Group { group_id, .. } => format!("group:{group_id}"),
+        Record::Conversation { target: t, .. } => target(t),
+        Record::Message(m) => format!("msg:{}", m.id),
+        Record::Manifest { part, .. } => format!("manifest:{part}"),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +292,11 @@ impl Inner {
     /// Builds the current record for a logical id (None = nothing to store, tombstone).
     fn build_record(&self, lid: &str) -> Result<Option<Record>> {
         let db = self.db.borrow();
+        if let Some(part) = lid.strip_prefix("manifest:") {
+            let parts: Vec<Vec<ManifestEntry>> = db.kv_get_json("vault_manifest")?.unwrap_or_default();
+            let part = part.parse::<usize>().ok();
+            return Ok(part.and_then(|i| parts.get(i).cloned().map(|entries| Record::Manifest { part: i as u32, entries })));
+        }
         if lid == "settings" {
             drop(db);
             return Ok(Some(Record::Settings {
@@ -316,6 +416,9 @@ impl Inner {
             }
             let mut records = Vec::with_capacity(lids.len());
             let mut notify_devices = false;
+            // One more than every version this device has seen.
+            let version: Version = (self.vault_clock()? + 1, s.account.device_id);
+            let mut written = Vec::with_capacity(lids.len());
             for lid in &lids {
                 if self.is_ephemeral_message(lid)? {
                     continue; // exists but must stay local only
@@ -324,15 +427,23 @@ impl Inner {
                 if !lid.starts_with("msg:") {
                     notify_devices = true;
                 }
-                let sealed = crypto::aead_seal(&s.keys.vault_key, &serde_json::to_vec(&record)?, VAULT_AAD)?;
-                records.push(VaultRecordDto {
-                    id: crypto::vault_record_id(&s.keys.vault_key, lid),
-                    data: Some(b64(sealed)),
-                    seq: 0,
-                });
+                let id = crypto::vault_record_id(&s.keys.vault_key, lid);
+                // A record vouched for by the device that linked us and not received yet:
+                // what we hold for it is a default, not the account's state. It is not
+                // written over the real one (which replaces ours when it arrives).
+                if self.vault_known(&id)?.is_some_and(|k| !k.applied) {
+                    continue;
+                }
+                let sealed = seal_record(&s.keys.vault_key, &id, version, &serde_json::to_vec(&record)?)?;
+                written.push((id.clone(), lid.clone()));
+                records.push(VaultRecordDto { id, data: Some(b64(sealed)), seq: 0 });
             }
             if !records.is_empty() {
                 let _: serde_json::Value = s.api.put("/v1/vault/records", &json!({ "records": records })).await?;
+                for (id, lid) in &written {
+                    self.vault_set_version(id, version, Some(lid), true)?;
+                }
+                self.vault_bump_clock(version.0)?;
             }
             {
                 let db = self.db.borrow();
@@ -346,10 +457,278 @@ impl Inner {
         }
     }
 
-    async fn vault_pull(&self) -> Result<()> {
+    fn vault_clock(&self) -> Result<u64> {
+        Ok(self.db.borrow().kv_get_json("vault_clock")?.unwrap_or(0))
+    }
+
+    fn vault_bump_clock(&self, n: u64) -> Result<()> {
+        if n > self.vault_clock()? {
+            self.db.borrow().kv_set_json("vault_clock", &n)?;
+        }
+        Ok(())
+    }
+
+    fn vault_known(&self, record_id: &str) -> Result<Option<Known>> {
+        Ok(self
+            .db
+            .borrow()
+            .conn
+            .query_row("SELECT n, d, lid, applied FROM vault_versions WHERE record_id = ?1", [record_id], |r| {
+                Ok(Known { version: (r.get::<_, i64>(0)? as u64, r.get(1)?), lid: r.get(2)?, applied: r.get(3)? })
+            })
+            .optional()?)
+    }
+
+    /// Remembers the version of a record; never goes back to a lower one.
+    fn vault_set_version(&self, record_id: &str, version: Version, lid: Option<&str>, applied: bool) -> Result<()> {
+        if self.vault_known(record_id)?.is_some_and(|k| k.version > version || (k.version == version && k.applied && !applied)) {
+            return Ok(());
+        }
+        self.db.borrow().conn.execute(
+            "INSERT INTO vault_versions (record_id, n, d, lid, applied) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(record_id) DO UPDATE SET n = excluded.n, d = excluded.d, lid = COALESCE(excluded.lid, lid), applied = excluded.applied",
+            params![record_id, version.0 as i64, version.1, lid, applied],
+        )?;
+        Ok(())
+    }
+
+    /// Takes one record from the server. Returns whether it was applied.
+    async fn vault_take(&self, key: &[u8; 32], record_id: &str, data: &str) -> Result<bool> {
+        let (version, plain) = open_record(key, record_id, &unb64(data)?)?;
+        self.vault_bump_clock(version.0)?;
+        let known = self.vault_known(record_id)?;
+        // Vouched for by the device that linked us and received only now: whatever we hold
+        // for it meanwhile is a default of this device, not a change of the user's.
+        let vouched = known.as_ref().is_some_and(|k| !k.applied);
+        if let Some(k) = known {
+            if version < k.version {
+                // An older copy than the one we have (a rollback, or two devices writing at
+                // once): ours stays, and goes up again so that the vault has it.
+                log::warn!("vault: record {record_id} came back older than known; keeping ours");
+                if let (true, Some(lid)) = (k.applied, &k.lid) {
+                    // Not in a loop: a server that keeps returning the old copy gets ours
+                    // once per period.
+                    let last = self.vault_healed.borrow().get(record_id).copied().unwrap_or(0);
+                    if now_ms() - last > HEAL_EVERY_MS {
+                        self.vault_healed.borrow_mut().insert(record_id.to_string(), now_ms());
+                        self.mark_dirty(lid);
+                    }
+                }
+                return Ok(false);
+            }
+            if version == k.version && k.applied {
+                return Ok(false); // our own write, or already applied
+            }
+        }
+        let rec: Record = serde_json::from_slice(&plain)?;
+        let lid = lid_of(&rec);
+        // Records from before versions do not authenticate their id: check it here, so one
+        // record cannot be served in place of another.
+        if crypto::vault_record_id(key, &lid) != record_id {
+            return Err(crate::error::CoreError::internal("stored under another record's id"));
+        }
+        if let Err(e) = self.apply_record(rec, vouched).await {
+            log::warn!("vault apply: {e}");
+        }
+        self.vault_set_version(record_id, version, Some(&lid), true)?;
+        Ok(true)
+    }
+
+    /// Existing device, when it links another: writes the manifest of the vault as it knows it
+    /// and returns what the new device must find. None: no anchor could be written (the new
+    /// device then restores as after a sign-in with the password).
+    pub(super) async fn vault_write_manifest(&self) -> Option<VaultFloor> {
+        let write = async {
+            self.vault_flush().await?; // everything pending first, so the manifest covers it
+            let entries: Vec<ManifestEntry> = {
+                let db = self.db.borrow();
+                let mut st = db.conn.prepare(
+                    "SELECT record_id, n, d FROM vault_versions
+                     WHERE applied = 1 AND lid IS NOT NULL AND lid NOT LIKE 'msg:%' AND lid NOT LIKE 'manifest:%' ORDER BY record_id",
+                )?;
+                let rows = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get(2)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let parts: Vec<Vec<ManifestEntry>> =
+                if entries.is_empty() { vec![Vec::new()] } else { entries.chunks(MANIFEST_PART).map(<[_]>::to_vec).collect() };
+            let mut content = Vec::new();
+            for (i, entries) in parts.iter().enumerate() {
+                content.extend(serde_json::to_vec(&Record::Manifest { part: i as u32, entries: entries.clone() })?);
+            }
+            self.db.borrow().kv_set_json("vault_manifest", &parts)?;
+            for i in 0..parts.len() {
+                self.mark_dirty(&format!("manifest:{i}"));
+            }
+            self.vault_flush().await?;
+            Ok::<_, crate::error::CoreError>(VaultFloor { parts: parts.len() as u32, hash: b64(crypto::sha256(&content)) })
+        };
+        match write.await {
+            Ok(floor) => Some(floor),
+            Err(e) => {
+                log::warn!("vault manifest: {e}");
+                None
+            }
+        }
+    }
+
+    /// Newly linked device: loads the manifest the linking device vouched for and takes its
+    /// versions as the minimum, before any record is applied. False: not there yet, wait.
+    async fn vault_floor_ready(&self) -> Result<bool> {
         let s = self.session()?;
+        let Some(floor) = self.db.borrow().kv_get_json::<VaultFloor>("vault_floor")? else { return Ok(true) };
+        if self.db.borrow().kv_get_json::<bool>("vault_floor_seeded")?.unwrap_or(false) {
+            return Ok(true);
+        }
+        let key = &s.keys.vault_key;
+        let ids: Vec<String> = (0..floor.parts.min(1024)).map(|i| crypto::vault_record_id(key, &format!("manifest:{i}"))).collect();
+        let mut found = std::collections::HashMap::new();
+        let mut since = 0i64;
+        for _ in 0..MAX_VAULT_PAGES_PER_PULL {
+            let page: VaultPageDto = s.api.get(&format!("/v1/vault/records?since={since}&limit=500")).await?;
+            for r in &page.records {
+                since = since.max(r.seq);
+                if let (true, Some(data)) = (ids.contains(&r.id), &r.data) {
+                    found.insert(r.id.clone(), data.clone());
+                }
+            }
+            if !page.more || page.records.is_empty() {
+                break;
+            }
+        }
+        let mut content = Vec::new();
+        let mut entries: Vec<ManifestEntry> = Vec::new();
+        let mut complete = true;
+        for (i, id) in ids.iter().enumerate() {
+            let part = found
+                .get(id)
+                .and_then(|d| unb64(d).ok())
+                .and_then(|blob| open_record(key, id, &blob).ok())
+                .and_then(|(_, plain)| match serde_json::from_slice::<Record>(&plain) {
+                    Ok(Record::Manifest { part, entries }) if part as usize == i => Some((plain, entries)),
+                    _ => None,
+                });
+            match part {
+                Some((plain, e)) => {
+                    content.extend(plain);
+                    entries.extend(e);
+                }
+                None => {
+                    complete = false;
+                    break;
+                }
+            }
+        }
+        if complete && b64(crypto::sha256(&content)) == floor.hash {
+            for (id, n, d) in &entries {
+                if id.len() <= 128 {
+                    self.vault_set_version(id, (*n, *d), None, false)?;
+                    self.vault_bump_clock(*n)?;
+                }
+            }
+            self.db.borrow().kv_set_json("vault_floor_seeded", &true)?;
+            log::info!("vault: {} record versions vouched for by the linking device", entries.len());
+            return Ok(true);
+        }
+        // The server does not have the manifest we were told about (yet, or any more).
+        self.vault_request_resend()?;
+        let since_login = now_ms() - self.db.borrow().kv_get_json::<i64>("vault_floor_at")?.unwrap_or(0);
+        if since_login < FLOOR_WAIT_MS {
+            return Ok(false);
+        }
+        log::warn!("vault: the manifest of the linking device never arrived; restoring without it");
+        self.emit("vault_incomplete", &json!({ "reason": "manifest" }));
+        let db = self.db.borrow();
+        db.kv_delete("vault_floor")?;
+        db.kv_set_json("restore_unanchored", &true)?;
+        Ok(true)
+    }
+
+    /// After a complete pull on a newly linked device: is everything vouched for there?
+    fn vault_floor_check(&self) -> Result<()> {
+        let seeded = self.db.borrow().kv_get_json::<bool>("vault_floor_seeded")?.unwrap_or(false);
+        if !seeded || self.db.borrow().kv_get("vault_floor")?.is_none() {
+            return Ok(());
+        }
+        let missing: i64 = self.db.borrow().conn.query_row("SELECT COUNT(*) FROM vault_versions WHERE applied = 0", [], |r| r.get(0))?;
+        if missing == 0 {
+            self.db.borrow().kv_delete("vault_floor")?;
+            log::info!("vault: complete, as vouched for by the linking device");
+        } else {
+            // Withheld or rolled back by the server: our other devices upload them again.
+            log::warn!("vault: {missing} records are missing or older than vouched for");
+            self.emit("vault_incomplete", &json!({ "missing": missing }));
+            self.vault_request_resend()?;
+        }
+        Ok(())
+    }
+
+    /// Asks our other devices to upload their records again (at most once a minute).
+    fn vault_request_resend(&self) -> Result<()> {
+        let last: i64 = self.db.borrow().kv_get_json("vault_resend_asked")?.unwrap_or(0);
+        if now_ms() - last < 60_000 {
+            return Ok(());
+        }
+        self.db.borrow().kv_set_json("vault_resend_asked", &now_ms())?;
+        self.enqueue(&super::send::Job::OwnDevices { content: Content::Sync(SyncMessage::VaultResend) })
+    }
+
+    /// A device of ours asked for the records again: everything except messages goes up under
+    /// new versions, the last manifest included.
+    pub(super) fn vault_resend_all(&self) -> Result<()> {
+        let last: i64 = self.db.borrow().kv_get_json("vault_resent")?.unwrap_or(0);
+        if now_ms() - last < 30_000 {
+            return Ok(());
+        }
+        self.db.borrow().kv_set_json("vault_resent", &now_ms())?;
+        let lids: Vec<String> = {
+            let db = self.db.borrow();
+            let mut st = db.conn.prepare("SELECT lid FROM vault_versions WHERE applied = 1 AND lid IS NOT NULL AND lid NOT LIKE 'msg:%'")?;
+            let rows = st.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for lid in &lids {
+            self.mark_dirty(lid);
+        }
+        Ok(())
+    }
+
+    /// Once per database: records written before versions existed go up again with one.
+    fn vault_upgrade_v2(&self) -> Result<()> {
+        if self.db.borrow().kv_get_json::<bool>("vault_v2")?.unwrap_or(false) {
+            return Ok(());
+        }
+        let ids = |sql: &str| -> Result<Vec<String>> {
+            let db = self.db.borrow();
+            let mut st = db.conn.prepare(sql)?;
+            let rows = st.query_map([], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        };
+        self.mark_dirty("settings");
+        for id in ids("SELECT account_id FROM contacts")? {
+            self.vault_put_contact(&id);
+        }
+        for id in ids("SELECT group_id FROM groups")? {
+            self.vault_put_group(&id);
+        }
+        for id in ids("SELECT id FROM conversations")? {
+            self.vault_put_conversation(&id);
+        }
+        if self.backup_enabled() && !self.temporary_mode() {
+            self.vault_backfill_messages()?;
+        }
+        self.db.borrow().kv_set_json("vault_v2", &true)
+    }
+
+    /// Pulls what changed in the vault. False: a newly linked device still waits for the
+    /// manifest (nothing was applied, and nothing must be written yet).
+    async fn vault_pull(&self) -> Result<bool> {
+        let s = self.session()?;
+        if !self.vault_floor_ready().await? {
+            return Ok(false);
+        }
         let restoring: bool = self.db.borrow().kv_get_json("restore_pending")?.unwrap_or(false);
         let mut applied = 0usize;
+        let mut complete = false;
         // A server answering `more: true` forever must not keep this loop (and the device)
         // busy: the rest is pulled by the next sync.
         for page_no in 0.. {
@@ -363,21 +742,10 @@ impl Inner {
             for r in &page.records {
                 max_seq = max_seq.max(r.seq);
                 let Some(data) = &r.data else { continue };
-                let plain = match unb64(data).and_then(|d| crypto::aead_open(&s.keys.vault_key, &d, VAULT_AAD)) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        log::warn!("vault record {}: {e}", r.id);
-                        continue;
-                    }
-                };
-                match serde_json::from_slice::<Record>(&plain) {
-                    Ok(rec) => {
-                        if let Err(e) = self.apply_record(rec).await {
-                            log::warn!("vault apply: {e}");
-                        }
-                        applied += 1;
-                    }
-                    Err(e) => log::warn!("vault decode: {e}"),
+                match self.vault_take(&s.keys.vault_key, &r.id, data).await {
+                    Ok(true) => applied += 1,
+                    Ok(false) => {}
+                    Err(e) => log::warn!("vault record {}: {e}", r.id),
                 }
             }
             self.db.borrow().kv_set_json("vault_seq", &max_seq)?;
@@ -385,6 +753,7 @@ impl Inner {
                 self.emit("history_sync", &json!({ "done": false, "records": applied }));
             }
             if !page.more {
+                complete = true;
                 break;
             }
         }
@@ -397,7 +766,16 @@ impl Inner {
             let _ = self.fetch_profile(&me).await;
             self.refresh_stale_profiles().await;
         }
-        Ok(())
+        if complete {
+            self.vault_floor_check()?;
+            // Restored with nothing but the server's vault: the profile key found there may
+            // be one we had rotated away from. A new one replaces it.
+            if self.db.borrow().kv_get_json::<bool>("restore_unanchored")?.unwrap_or(false) {
+                self.db.borrow().kv_delete("restore_unanchored")?;
+                self.request_profile_key_rotation()?;
+            }
+        }
+        Ok(true)
     }
 
     async fn conv_for_target(&self, target: &Target) -> Result<String> {
@@ -407,7 +785,8 @@ impl Inner {
         }
     }
 
-    async fn apply_record(&self, rec: Record) -> Result<()> {
+    /// `vouched`: see `vault_take` (the record wins over what this device holds).
+    async fn apply_record(&self, rec: Record, vouched: bool) -> Result<()> {
         match rec {
             Record::Deleted { lid } => {
                 if let Some(id) = lid.strip_prefix("msg:") {
@@ -439,12 +818,12 @@ impl Inner {
                     self.apply_synced_call_settings(c)?;
                 }
                 if let Some(k) = profile_key.as_deref().and_then(|k| unb64(k).ok()) {
-                    self.set_rotated_profile_key(&k)?;
+                    self.set_rotated_profile_key(&k, false)?;
                 }
             }
             Record::Contact { account_id, number, local_name, phone, blocked, verified, is_contact, profile_key, updated_at, identity_key } => {
                 if let Some(key) = identity_key.as_deref().and_then(|k| unb64(k).ok()) {
-                    self.pin_identity_from_vault(&account_id, &key)?;
+                    self.pin_identity(&account_id, &key)?;
                 }
                 let local_updated: Option<i64> = self
                     .db
@@ -452,7 +831,7 @@ impl Inner {
                     .conn
                     .query_row("SELECT updated_at FROM contacts WHERE account_id = ?1", [&account_id], |r| r.get(0))
                     .optional()?;
-                if local_updated.map(|u| u > updated_at).unwrap_or(false) {
+                if !vouched && local_updated.map(|u| u > updated_at).unwrap_or(false) {
                     return Ok(());
                 }
                 let pk = profile_key.and_then(|k| unb64(&k).ok());
@@ -495,6 +874,7 @@ impl Inner {
                 )?;
                 self.emit_conversation(&conv);
             }
+            Record::Manifest { .. } => {} // read by `vault_floor_ready`
             Record::Message(m) => {
                 if !crate::util::is_id(&m.id) {
                     return Ok(());
@@ -589,17 +969,26 @@ impl Inner {
         let mut pulled_once = false;
         loop {
             if self.ws_out.borrow().is_some() {
-                if let Err(e) = self.vault_flush().await {
-                    log::info!("vault flush: {e}");
+                if let Err(e) = self.vault_upgrade_v2() {
+                    log::info!("vault upgrade: {e}");
                 }
-                if let Err(e) = self.vault_pull().await {
-                    log::info!("vault pull: {e}");
-                } else {
-                    pulled_once = true;
+                // Pull first: what we write next is versioned above everything seen so far.
+                match self.vault_pull().await {
+                    Ok(ready) => {
+                        pulled_once = ready;
+                        if ready {
+                            if let Err(e) = self.vault_flush().await {
+                                log::info!("vault flush: {e}");
+                            }
+                        }
+                    }
+                    Err(e) => log::info!("vault pull: {e}"),
                 }
             }
             let notify = self.vault_notify.clone();
-            let wait = if pulled_once { 300 } else { 10 };
+            // A newly linked device still short of what was vouched for looks again soon.
+            let incomplete = matches!(self.db.borrow().kv_get("vault_floor"), Ok(Some(_)));
+            let wait = if pulled_once && !incomplete { 300 } else { 10 };
             tokio::select! {
                 _ = notify.notified() => {
                     // Coalesce bursts of writes.
@@ -649,8 +1038,9 @@ fn vault_message(m: MessageRow, target: Target, reactions: Vec<(String, String)>
 }
 
 impl Inner {
-    /// Pins an identity learned by another of our devices; never replaces a pinned one.
-    fn pin_identity_from_vault(&self, account_id: &str, key: &[u8]) -> Result<()> {
+    /// Pins an identity learned by another of our devices (or checked against the key
+    /// transparency log for the safety number); never replaces a pinned one.
+    pub(super) fn pin_identity(&self, account_id: &str, key: &[u8]) -> Result<()> {
         let db = self.db.borrow();
         let existing: Option<Vec<u8>> = db
             .conn
@@ -674,4 +1064,65 @@ impl Inner {
 
 fn accepted_default() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_are_bound_to_their_id_and_version() {
+        let key = [3u8; 32];
+        let blob = seal_record(&key, "id-a", (7, 2), b"content").unwrap();
+        assert_eq!(open_record(&key, "id-a", &blob).unwrap(), ((7, 2), b"content".to_vec()));
+        // Served under another record's id.
+        assert!(open_record(&key, "id-b", &blob).is_err());
+        // A changed version (header) or content.
+        for i in [1, 8, 9, 12, HEADER_LEN + 13] {
+            let mut bad = blob.clone();
+            bad[i] ^= 1;
+            assert!(open_record(&key, "id-a", &bad).is_err(), "byte {i}");
+        }
+        // The header removed (to pass it off as a record from before versions).
+        assert!(open_record(&key, "id-a", &blob[HEADER_LEN..]).is_err());
+        assert!(open_record(&[4u8; 32], "id-a", &blob).is_err());
+    }
+
+    #[test]
+    fn records_from_before_versions_count_as_the_lowest_version() {
+        let key = [3u8; 32];
+        let legacy = crypto::aead_seal(&key, b"old", VAULT_AAD).unwrap();
+        assert_eq!(open_record(&key, "any", &legacy).unwrap(), ((0, 0), b"old".to_vec()));
+        // Also when its random nonce happens to start like a versioned record.
+        let mut tries = 0;
+        loop {
+            let l = crypto::aead_seal(&key, b"old", VAULT_AAD).unwrap();
+            tries += 1;
+            if l[0] == BLOB_V2 || tries > 20_000 {
+                assert_eq!(open_record(&key, "any", &l).unwrap().0, (0, 0));
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn versions_order_by_counter_then_device() {
+        let (a, b, c): (Version, Version, Version) = ((5, 9), (6, 1), (6, 2));
+        assert!(a < b && b < c && (0, 0) < a);
+    }
+
+    #[test]
+    fn every_record_names_its_logical_id() {
+        let peer = Record::Conversation {
+            target: Target::Peer { account_id: "p".into() },
+            muted_until: None,
+            archived: false,
+            pinned: false,
+            disappearing_seconds: 0,
+            accepted: true,
+        };
+        assert_eq!(lid_of(&peer), "conv:peer:p");
+        assert_eq!(lid_of(&Record::Deleted { lid: "msg:x".into() }), "msg:x");
+        assert_eq!(lid_of(&Record::Manifest { part: 3, entries: vec![] }), "manifest:3");
+    }
 }

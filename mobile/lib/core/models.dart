@@ -22,6 +22,12 @@ class ServerInfo {
   final int maxAttachmentBytes;
   final int maxDevices;
 
+  /// Newest version of this app the server announces ("1.2.3"), null when none.
+  final String? clientLatest;
+
+  /// Versions older than this must update before the app can be used.
+  final String? clientMin;
+
   const ServerInfo({
     required this.url,
     required this.name,
@@ -30,6 +36,8 @@ class ServerInfo {
     required this.phoneVerificationEnabled,
     required this.maxAttachmentBytes,
     required this.maxDevices,
+    this.clientLatest,
+    this.clientMin,
   });
 
   factory ServerInfo.fromJson(Json j) => ServerInfo(
@@ -40,6 +48,8 @@ class ServerInfo {
         phoneVerificationEnabled: _bool(j['phone_verification_enabled']),
         maxAttachmentBytes: _int(j['max_attachment_bytes']),
         maxDevices: _int(j['max_devices']),
+        clientLatest: _str(j['client_latest']),
+        clientMin: _str(j['client_min']),
       );
 }
 

@@ -76,6 +76,10 @@ impl Inner {
     pub async fn check_server(&self, url: &str) -> Result<ServerInfo> {
         let url = normalize_server_url(url).ok_or_else(|| CoreError::invalid("invalid server URL"))?;
         let info = ApiClient::new(&url, None).info().await?;
+        // What the server announces for this app's platform; anything that is not a plain
+        // version number is ignored.
+        let announced = info.client_versions.get(self.platform.as_str()).cloned().unwrap_or_default();
+        let plain = |v: Option<String>| v.filter(|v| crate::model::is_plain_version(v));
         Ok(ServerInfo {
             url,
             name: info.name,
@@ -84,6 +88,8 @@ impl Inner {
             phone_verification_enabled: info.phone_verification_enabled,
             max_attachment_bytes: info.max_attachment_bytes,
             max_devices: info.max_devices,
+            client_latest: plain(announced.latest),
+            client_min: plain(announced.min),
         })
     }
 
@@ -298,6 +304,23 @@ impl Inner {
             db.kv_set_json("vault_seq", &0i64)?;
             db.kv_set_json("backup_enabled", &true)?;
             db.kv_set_json("restore_pending", &restore_history)?;
+            // Vault versions (engine/vault.rs) start over with the account.
+            db.conn.execute("DELETE FROM vault_versions", [])?;
+            for k in ["vault_clock", "vault_floor", "vault_floor_seeded", "vault_floor_at", "restore_unanchored"] {
+                db.kv_delete(k)?;
+            }
+            db.kv_set_json("vault_v2", &true)?;
+            match self.link_floor.take() {
+                // Linked by a device of ours: it vouched for the versions the vault must have.
+                Some(floor) => {
+                    db.kv_set_json("vault_floor", &floor)?;
+                    db.kv_set_json("vault_floor_at", &crate::util::now_ms())?;
+                }
+                // Signed in with the password or the recovery phrase: whatever the server
+                // returns as the vault is all there is.
+                None if restore_history => db.kv_set_json("restore_unanchored", &true)?,
+                None => {}
+            }
         }
         if let Err(e) = self.upload_initial_keys().await {
             // Without keys nobody can message this device; undo the local login.

@@ -232,6 +232,15 @@ pub struct Inner {
     /// Wakes the expiry loop when a disappearing message is stored.
     pub expiry_notify: Rc<Notify>,
     pub vault_notify: Rc<Notify>,
+    /// The vault versions the device that links this one vouched for (engine/link.rs), kept
+    /// until the login stores them.
+    pub(crate) link_floor: RefCell<Option<vault::VaultFloor>>,
+    /// When each vault record was last uploaded again because the server returned an older
+    /// copy (engine/vault.rs): not more than once in a while, whatever the server does.
+    pub(crate) vault_healed: RefCell<HashMap<String, i64>>,
+    /// Added to the time given to libsignal for its sessions. Zero, except in tests of what
+    /// happens to a session after weeks (see `insecure_advance_session_clock`).
+    pub(crate) session_clock_ahead: Cell<std::time::Duration>,
     /// A push said messages are waiting: reconnect now, or check that the socket still lives.
     pub net_wake: Rc<Notify>,
     /// Mobile app in the background (engine/net.rs): the socket closes at this deadline and opens
@@ -303,6 +312,9 @@ impl Inner {
             outbox_notify: Rc::new(Notify::new()),
             expiry_notify: Rc::new(Notify::new()),
             vault_notify: Rc::new(Notify::new()),
+            link_floor: RefCell::new(None),
+            vault_healed: RefCell::new(HashMap::new()),
+            session_clock_ahead: Cell::new(std::time::Duration::ZERO),
             net_wake: Rc::new(Notify::new()),
             bg_deadline: Cell::new(None),
             away_since: Cell::new(None),

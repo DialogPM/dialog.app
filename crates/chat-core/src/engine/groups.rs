@@ -151,7 +151,7 @@ impl Inner {
     }
 
     /// Starts a new sender key chain for the group (after a member left or was removed).
-    fn rotate_distribution(&self, group_id: &str) -> Result<()> {
+    pub(super) fn rotate_distribution(&self, group_id: &str) -> Result<()> {
         self.db
             .borrow()
             .conn
@@ -193,6 +193,9 @@ impl Inner {
 
     /// Fetches the group from the server and updates local state.
     pub async fn sync_group(&self, group_id: &str, _revision: Option<i64>) -> Result<()> {
+        if !crate::util::is_id(group_id) {
+            return Err(CoreError::invalid("invalid group id"));
+        }
         if self.is_group_v2(group_id) {
             return self.sync_group_v2(group_id).await;
         }
@@ -346,7 +349,8 @@ impl Inner {
         // The control id is chosen by the sender: it names a row only when well-formed.
         let row_id = crate::util::is_id(id).then(|| format!("grptimer-{id}"));
         self.insert_system_message(conv_id, "disappearing_changed", Some(actor.to_string()), vec![], Some(now.to_string()), row_id, now_ms())?;
-        self.expire_existing(conv_id, now)?;
+        // The new timer is for messages sent from now on (as in direct chats): an admin, or a
+        // server editing the group, cannot make the members' history disappear with it.
         self.vault_put_conversation(conv_id);
         Ok(())
     }
@@ -419,6 +423,10 @@ impl Inner {
     }
 
     pub async fn handle_group_control(&self, sender: &str, ctrl: GroupControl) -> Result<()> {
+        if !crate::util::is_id(&ctrl.group_id) {
+            log::warn!("ignoring group control with a malformed group id from {sender}");
+            return Ok(());
+        }
         let key = unb64(&ctrl.group_key)?;
         let gid = ctrl.group_id.clone();
         let me = self.me()?;

@@ -301,6 +301,36 @@ impl Inner {
         }
     }
 
+    /// The time libsignal judges sessions by.
+    pub(super) fn session_now(&self) -> SystemTime {
+        SystemTime::now() + self.session_clock_ahead.get()
+    }
+
+    /// Forgets the sessions libsignal no longer encrypts with and returns their devices.
+    /// libsignal stops using a session whose first message got no answer for 30 days (the
+    /// pre-key it used may be gone by now): encrypting fails with "session not found", and
+    /// would fail for good, since the session is still there. A new one, from a new pre-key
+    /// bundle, takes its place.
+    async fn drop_unusable_sessions(&self, account_id: &str, devices: &[u32]) -> Result<Vec<u32>> {
+        let mut dropped = Vec::new();
+        for &d in devices {
+            let Ok(device_id) = DeviceId::new(d as u8) else { continue };
+            let address = ProtocolAddress::new(account_id.to_string(), device_id);
+            let usable = match self.signal_store()?.load_session(&address).await? {
+                Some(record) => record
+                    .has_usable_sender_chain(self.session_now(), libsignal_protocol::SessionUsabilityRequirements::all())
+                    .unwrap_or(false),
+                None => false,
+            };
+            if !usable {
+                log::info!("the session with {account_id}.{d} can no longer be used; starting a new one");
+                self.delete_session(account_id, d)?;
+                dropped.push(d);
+            }
+        }
+        Ok(dropped)
+    }
+
     fn session_devices(&self, account_id: &str) -> Result<Vec<u32>> {
         let s = self.session()?;
         let db = self.db.borrow();
@@ -383,7 +413,7 @@ impl Inner {
                 &mut sessions,
                 &mut identities,
                 &bundle,
-                SystemTime::now(),
+                self.session_now(),
                 &mut rand::rng(),
             )
             .await
@@ -429,7 +459,7 @@ impl Inner {
                 &local,
                 &mut sessions,
                 &mut identities,
-                SystemTime::now(),
+                self.session_now(),
                 &mut rand::rng(),
             )
             .await?;
@@ -462,6 +492,11 @@ impl Inner {
             _ => None,
         };
         let no_push = call_signal_without_push(content);
+        if !is_self {
+            // An identity pinned from their first message may not have been checked against the
+            // key transparency log yet: nothing goes out for it before it is.
+            self.kt_require_pinned(account_id).await?;
+        }
         let mut fetched_all = false;
         // Sealed sender when we know the contact's access key (never for our own devices).
         let mut sealed = match (is_self, self.peer_access_key(account_id)) {
@@ -470,6 +505,21 @@ impl Inner {
         };
         for _ in 0..6 {
             let mut devices = self.session_devices(account_id)?;
+            let unusable = self.drop_unusable_sessions(account_id, &devices).await?;
+            if !unusable.is_empty() {
+                if online {
+                    return Ok(()); // never consume pre-keys for ephemeral messages
+                }
+                for d in unusable {
+                    match self.fetch_sessions(account_id, Some(d)).await {
+                        // The device is gone: the account's other devices (or all of them,
+                        // fetched below) are what is left.
+                        Err(e) if matches!(e.code, ErrorCode::NotFound | ErrorCode::NoDevices) => {}
+                        r => r?,
+                    }
+                }
+                devices = self.session_devices(account_id)?;
+            }
             if devices.is_empty() && !is_self {
                 if online {
                     return Ok(()); // never consume pre-keys for ephemeral messages
@@ -784,5 +834,13 @@ mod no_push_tests {
         let req = |no_push| SendReq { timestamp: 1, online: false, messages: Vec::new(), call_id: None, no_push };
         assert!(!serde_json::to_string(&req(false)).unwrap().contains("no_push"));
         assert!(serde_json::to_string(&req(true)).unwrap().contains("\"no_push\":true"));
+    }
+}
+
+#[cfg(feature = "insecure-test-hooks")]
+impl Inner {
+    /// TEST ONLY: libsignal sees its sessions as if this much time had passed.
+    pub fn insecure_advance_session_clock(&self, by: std::time::Duration) {
+        self.session_clock_ahead.set(self.session_clock_ahead.get() + by);
     }
 }

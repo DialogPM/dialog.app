@@ -106,6 +106,18 @@ pub struct ServerInfoDto {
     /// The server wants new groups created as v2.
     #[serde(default)]
     pub groups_v2_default: bool,
+    /// App versions the operator announces, per platform ("desktop" | "android" | "ios").
+    #[serde(default)]
+    pub client_versions: std::collections::HashMap<String, ClientVersionsDto>,
+}
+
+/// One platform's entry of `client_versions`: versions "major.minor.patch".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientVersionsDto {
+    #[serde(default)]
+    pub latest: Option<String>,
+    #[serde(default)]
+    pub min: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

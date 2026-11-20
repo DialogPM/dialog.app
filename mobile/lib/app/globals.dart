@@ -14,7 +14,17 @@ import '../state/store.dart';
 /// `flutter build apk --dart-define=CHATAPP_DEFAULT_SERVER=https://chat.example.org`
 const String kDefaultServer = String.fromEnvironment('CHATAPP_DEFAULT_SERVER', defaultValue: 'https://chat.dialog.pm');
 
-const String kAppVersion = '1.0.0';
+/// The app's version: the same as `version:` in pubspec.yaml without the build number
+/// (test/version_test.dart checks it). Shown in About and compared with the versions a server
+/// announces for the update prompt.
+const String kAppVersion = '1.0.1';
+
+/// Where the update prompt sends the user. Built into the app: a server only ever announces a
+/// version number. iOS uses the App Store page once [kAppStoreId] is filled in (the numeric
+/// Apple ID of the app, App Store Connect → App Information), the download page until then.
+const String kAppStoreId = '';
+const String kDownloadPage = 'https://dialog.pm/#descarca';
+const String kPlayStoreUrl = 'https://play.google.com/store/apps/details?id=pm.dialog.chat';
 
 late ProviderContainer container;
 late Backend backend;
