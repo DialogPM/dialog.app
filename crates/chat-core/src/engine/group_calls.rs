@@ -15,6 +15,9 @@
 //! * `group_offer` / `group_answer` / `group_ice` / `group_hangup` / `group_media` (pairwise,
 //!   to one device): WebRTC signaling of one pair. To avoid glare, the device with the
 //!   smaller `(account_id, device_id)` makes the offer; offers from the other side are dropped.
+//!   `group_media` says what a device's video is: `{"camera": bool}` and `{"screen": bool}`
+//!   (a computer shares its screen on the pair's video section, in place of its camera; every
+//!   pair has that section, also in a voice call, so no new offer is needed).
 //!
 //! Only end-to-end attested members (engine/attest.rs) take part: signals from anyone else are
 //! dropped. Calls ring only in accepted conversations that are not muted, and not during do not

@@ -52,6 +52,8 @@ class GroupPeer {
   final String? avatar;
   final MediaStream? stream;
   final bool cameraOn;
+  /// Their video is their screen (a computer shares it), not their camera.
+  final bool screenOn;
   final bool connected;
   final bool speaking;
 
@@ -63,13 +65,17 @@ class GroupPeer {
     this.avatar,
     this.stream,
     this.cameraOn = true,
+    this.screenOn = false,
     this.connected = false,
     this.speaking = false,
   });
 
-  bool get showsVideo => cameraOn && (stream?.getVideoTracks().isNotEmpty ?? false);
+  bool get _hasVideo => stream?.getVideoTracks().isNotEmpty ?? false;
+  bool get showsVideo => cameraOn && _hasVideo;
+  /// Their screen is on the wire and received (also in a voice call).
+  bool get showsScreen => screenOn && _hasVideo;
 
-  GroupPeer copyWith({MediaStream? stream, bool clearStream = false, bool? cameraOn, bool? connected, bool? speaking}) => GroupPeer(
+  GroupPeer copyWith({MediaStream? stream, bool clearStream = false, bool? cameraOn, bool? screenOn, bool? connected, bool? speaking}) => GroupPeer(
         key: key,
         accountId: accountId,
         deviceId: deviceId,
@@ -77,6 +83,7 @@ class GroupPeer {
         avatar: avatar,
         stream: clearStream ? null : (stream ?? this.stream),
         cameraOn: cameraOn ?? this.cameraOn,
+        screenOn: screenOn ?? this.screenOn,
         connected: connected ?? this.connected,
         speaking: speaking ?? this.speaking,
       );
@@ -309,7 +316,9 @@ Future<_Pair?> _newPair(String accountId, int deviceId, bool relay) async {
   for (final track in stream.getTracks()) {
     await pc.addTrack(track, stream);
   }
-  if (offerer && groupCallState.value?.video == true && stream.getVideoTracks().isEmpty) {
+  // Without our camera the pair still has a video section, also in a voice call: it receives
+  // the others' video and the screen a computer shares (a phone never shares its own).
+  if (offerer && stream.getVideoTracks().isEmpty) {
     await pc.addTransceiver(
       kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
       init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
@@ -373,6 +382,7 @@ Future<_Pair?> _newPair(String accountId, int deviceId, bool relay) async {
           name: who.name,
           avatar: who.avatar,
           cameraOn: c.peers[key]?.cameraOn ?? true,
+          screenOn: c.peers[key]?.screenOn ?? false,
         ),
       }));
   return pair;
@@ -951,6 +961,8 @@ Future<void> handleGroupCallSignal(GroupCallSignalEvent ev) async {
     case 'media':
       final camera = ev.data?['camera'];
       if (camera is bool) _setPeer(key, (p) => p.copyWith(cameraOn: camera));
+      final screen = ev.data?['screen'];
+      if (screen is bool) _setPeer(key, (p) => p.copyWith(screenOn: screen));
     case 'hangup':
       if (pair == null) return;
       _closePair(pair);

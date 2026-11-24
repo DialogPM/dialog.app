@@ -142,12 +142,22 @@ class _GroupCallScreenState extends State<_GroupCallScreen> {
           name: p.name,
           avatar: p.avatar,
           seed: p.accountId,
-          stream: call.video && p.showsVideo ? p.stream : null,
+          // The sharer's screen has its own view above; their tile shows the avatar.
+          stream: call.video && p.showsVideo && !p.showsScreen ? p.stream : null,
           speaking: p.speaking,
           connected: p.connected,
         ),
     ];
-    final columns = count <= 2 ? 1 : 2;
+    // A screen someone shares (from a computer) gets the upper part, shown whole; the tiles
+    // move below it.
+    GroupPeer? sharer;
+    for (final p in peers) {
+      if (p.showsScreen) {
+        sharer = p;
+        break;
+      }
+    }
+    final columns = sharer != null ? (tiles.length <= 2 ? tiles.length : 3) : (count <= 2 ? 1 : 2);
     return Material(
       color: Colors.black,
       child: Stack(fit: StackFit.expand, children: [
@@ -155,11 +165,20 @@ class _GroupCallScreenState extends State<_GroupCallScreen> {
         SafeArea(
           child: Column(children: [
             Padding(padding: const EdgeInsets.fromLTRB(20, 16, 20, 8), child: _header(context, status, mono: call.joinedAt != null)),
+            if (sharer != null)
+              Expanded(
+                flex: 3,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: _ScreenView(peer: sharer),
+                ),
+              ),
             Expanded(
+              flex: 2,
               child: LayoutBuilder(builder: (context, box) {
                 final rows = (tiles.length / columns).ceil();
                 final width = (box.maxWidth - 24 - (columns - 1) * 8) / columns;
-                final height = rows == 0 ? box.maxHeight : ((box.maxHeight - 16 - (rows - 1) * 8) / rows).clamp(120.0, 600.0);
+                final height = rows == 0 ? box.maxHeight : ((box.maxHeight - 16 - (rows - 1) * 8) / rows).clamp(sharer != null ? 84.0 : 120.0, 600.0);
                 return GridView.count(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   crossAxisCount: columns,
@@ -205,6 +224,48 @@ class _GroupCallScreenState extends State<_GroupCallScreen> {
               ]),
             ),
           ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// The screen a participant shares: the whole picture (not cropped), with whose it is.
+class _ScreenView extends StatelessWidget {
+  const _ScreenView({required this.peer});
+
+  final GroupPeer peer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(fit: StackFit.expand, children: [
+        CallStreamView(stream: peer.stream!, cover: false),
+        Positioned(
+          left: 8,
+          bottom: 8,
+          right: 8,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(999)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const AppIcon('screen', size: 14, color: _fg),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    context.t('call.peerScreen', args: {'name': peer.name}),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts(12.5, color: _fg),
+                  ),
+                ),
+              ]),
+            ),
+          ),
         ),
       ]),
     );
