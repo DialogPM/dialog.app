@@ -22,17 +22,31 @@ class MainActivity : FlutterFragmentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var clearClipboard: Runnable? = null
 
+    // Username links (https://dialog.pm/@name, dialog://u/name; mobile/lib/services/user_links.dart):
+    // the address only, which Dart parses and asks the user about.
+    private var linksChannel: MethodChannel? = null
+    private var launchLink: String? = null
+
+    private fun linkOf(intent: Intent?): String? =
+        if (intent?.action == Intent.ACTION_VIEW) intent.dataString else null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Screen security is on by default (like Signal): set before the first frame so the
         // recent-apps thumbnail never shows content. Dart turns it off if the user disabled it.
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         super.onCreate(savedInstanceState)
         showOverLockScreenForCall(intent)
+        // Not when Android recreates the activity: the link was handled the first time.
+        if (savedInstanceState == null) launchLink = linkOf(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         showOverLockScreenForCall(intent)
+        linkOf(intent)?.let { link ->
+            val channel = linksChannel
+            if (channel != null) channel.invokeMethod("link", link) else launchLink = link
+        }
     }
 
     /** Opened from an incoming-call notification (full-screen intent or Answer): show over the
@@ -63,6 +77,17 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        linksChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dialog/links").also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "initial" -> {
+                        result.success(launchLink)
+                        launchLink = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         // Ongoing call: foreground service + proximity wake lock (CallService.kt,
         // mobile/lib/services/ongoing_call.dart).
         val callChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dialog/call_service")

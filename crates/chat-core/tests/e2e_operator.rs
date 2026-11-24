@@ -587,3 +587,45 @@ async fn the_operator_keys_are_pinned() {
     alice.fetch_profile(&a.account_id).await;
     assert_eq!(alice.rpc("get_profile", json!({})).await["official"], Value::Null);
 }
+
+/// The operator takes a username away from one account (docs/ADMIN-API.md): the account keeps
+/// working and can choose another name; with `block` nobody can take the removed one again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_operator_removes_a_username_from_an_account() {
+    if skip() {
+        return;
+    }
+    let alice = Client::new("alice");
+    let bob = Client::new("bob");
+    let accounts = register(&[&alice, &bob]).await;
+    let name = format!("boss{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    let username = |c: &Client| {
+        let core = c.core.clone();
+        async move { core.run(|i| async move { i.account_details().await }).await.unwrap().username }
+    };
+    let take = |c: &Client, n: String| {
+        let core = c.core.clone();
+        async move { core.run(move |i| async move { i.set_username(Some(n)).await }).await }
+    };
+    let remove = format!("/v1/admin/accounts/{}/username/remove", accounts[0].account_id);
+
+    // Removed without blocking: the name is free again, for anyone.
+    take(&alice, name.clone()).await.unwrap();
+    let r = admin("POST", &remove, Some(json!({}))).await;
+    assert_eq!((r["username"].as_str(), r["blocked"].as_bool()), (Some(name.as_str()), Some(false)));
+    assert_eq!(username(&alice).await, None);
+    take(&bob, name.clone()).await.unwrap();
+
+    // Removed and blocked: neither the name nor its numbered forms can be taken any more,
+    // while the account stays signed in and may choose another one.
+    let name = format!("chief{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    take(&alice, name.clone()).await.unwrap();
+    let r = admin("POST", &remove, Some(json!({ "block": true }))).await;
+    assert_eq!(r["blocked"].as_bool(), Some(true));
+    assert_eq!(username(&alice).await, None);
+    assert!(take(&alice, name.clone()).await.is_err());
+    assert!(take(&bob, format!("{name}.01")).await.is_err());
+    take(&alice, format!("{name}_ok")).await.unwrap();
+    assert_eq!(username(&alice).await, Some(format!("{name}_ok")));
+    admin("POST", "/v1/admin/usernames/unblock", Some(json!({ "pattern": name }))).await;
+}

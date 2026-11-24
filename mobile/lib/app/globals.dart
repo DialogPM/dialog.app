@@ -17,7 +17,7 @@ const String kDefaultServer = String.fromEnvironment('CHATAPP_DEFAULT_SERVER', d
 /// The app's version: the same as `version:` in pubspec.yaml without the build number
 /// (test/version_test.dart checks it). Shown in About and compared with the versions a server
 /// announces for the update prompt.
-const String kAppVersion = '1.0.5';
+const String kAppVersion = '1.0.6';
 
 /// Where the update prompt sends the user. Built into the app: a server only ever announces a
 /// version number. iOS uses the App Store page once [kAppStoreId] is filled in (the numeric

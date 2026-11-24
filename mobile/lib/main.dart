@@ -28,6 +28,7 @@ import 'state/events.dart';
 import 'state/prefs.dart';
 import 'state/push_handling.dart';
 import 'app/nav.dart';
+import 'services/user_links.dart';
 
 const _dbKeyName = 'chatapp_db_key';
 
@@ -93,6 +94,8 @@ Future<void> main() async {
     // Android: foreground service + proximity lock while a call is in progress.
     initCallSystem();
     await Push.instance.init();
+    // Username links (https://dialog.pm/@name) that open the app.
+    unawaited(userLinks.start());
     onSessionStarted = () {
       unawaited(Notifications.instance.requestPermission());
       unawaited(onPushSessionStarted());

@@ -30,6 +30,7 @@ import '../widgets/app_icon.dart';
 import '../widgets/ui.dart';
 import 'globals.dart';
 import 'nav.dart';
+import '../services/user_links.dart';
 
 class ChatApp extends ConsumerStatefulWidget {
   const ChatApp({super.key, this.startError});
@@ -169,7 +170,11 @@ class _RootState extends ConsumerState<_Root> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(storeProvider.select((s) => s.locked), (_, locked) => _syncLock(locked));
+    ref.listen(storeProvider.select((s) => s.locked), (_, locked) {
+      _syncLock(locked);
+      // A username link that arrived while locked is handled once unlocked.
+      if (!locked) unawaited(userLinks.drain());
+    });
     ref.listen(prefsProvider.select((p) => p.screenSecurity), (_, on) => unawaited(applyScreenSecurity(on)));
     final appState = ref.watch(storeProvider.select((s) => s.appState));
     ref.listen(storeProvider.select((s) => s.appState?.status), (prev, next) {

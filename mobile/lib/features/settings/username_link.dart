@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../app/globals.dart';
 import '../../state/actions.dart';
 import '../../core/models.dart';
+import '../../services/user_links.dart';
 import '../../l10n/i18n.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dialogs.dart';
@@ -132,6 +133,32 @@ class _UsernameLinkBodyState extends State<_UsernameLinkBody> {
         ),
         ChipBtn(label: context.t('settings.username.linkReset'), icon: 'refresh', tone: 'danger', onPressed: _busy || link == null ? null : _reset),
       ]),
+      if (link != null && userLinksAvailable) ...[
+        const SizedBox(height: 18),
+        Divider(height: 1, color: t.line),
+        const SizedBox(height: 16),
+        Text(context.t('settings.username.webLink'), textAlign: TextAlign.center, style: ts(14.5, weight: 650, color: t.ink)),
+        const SizedBox(height: 4),
+        Text('$kUserLinkHost/@${link.username}', textAlign: TextAlign.center, style: ts(14, color: t.accentText, mono: true)),
+        const SizedBox(height: 8),
+        Text(context.t('settings.username.webLinkHint'), textAlign: TextAlign.center, style: ts(13, color: t.muted, height: 1.45)),
+        const SizedBox(height: 12),
+        Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
+          ChipBtn(
+            label: context.t('qr.copyLink'),
+            icon: 'copy',
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: userLink(link.username)));
+              notifyOk(tr('qr.linkCopied'));
+            },
+          ),
+          ChipBtn(
+            label: context.t('qr.share'),
+            icon: 'share',
+            onPressed: () => SharePlus.instance.share(ShareParams(text: userLink(link.username), subject: context.t('qr.shareTitle'))),
+          ),
+        ]),
+      ],
     ]);
   }
 }

@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/globals.dart';
 import '../../services/battery.dart';
+import '../../services/user_links.dart';
 
 import '../chats/qr_sheet.dart';
 import '../lock/data_lock_screen.dart';
@@ -36,6 +37,19 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   int _tab = 0;
   bool _qrOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // A username link that opened the app (services/user_links.dart) is handled from here.
+    WidgetsBinding.instance.addPostFrameCallback((_) => userLinks.home(true));
+  }
+
+  @override
+  void dispose() {
+    userLinks.home(false);
+    super.dispose();
+  }
 
   Future<void> _openQr() async {
     setState(() => _qrOpen = true);

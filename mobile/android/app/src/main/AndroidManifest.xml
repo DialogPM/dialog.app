@@ -66,6 +66,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Username links, https://dialog.pm/@name: open here instead of the browser once
+                 Android verified https://dialog.pm/.well-known/assetlinks.json (site/build.py). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="dialog.pm" android:pathPrefix="/@"/>
+            </intent-filter>
+            <!-- dialog://u/name: what the web page of a username link opens. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="dialog" android:host="u"/>
+            </intent-filter>
         </activity>
         <!-- Ongoing call (1:1 or group): keeps microphone / camera while in the background. -->
         <service
