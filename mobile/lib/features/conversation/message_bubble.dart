@@ -26,6 +26,7 @@ import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
 import '../../widgets/emoji_data.dart';
 import '../../widgets/emoji_picker.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import '../chats/chat_list.dart';
 import '../groups/invite_pages.dart';
@@ -287,9 +288,15 @@ class MessageRow extends ConsumerWidget {
 
     final children = <Widget>[];
     if (showName) {
+      // Group senders who are our contacts carry their official badge here too: a member who
+      // only names themselves "Support" gets none.
+      final senderOfficial = ref.watch(storeProvider.select((s) => s.contacts[m.senderAccountId]?.official));
       children.add(Padding(
         padding: innerPad.add(const EdgeInsets.only(bottom: 3)),
-        child: Text(m.senderName, style: ts(13, weight: 700, color: nameColor(hueFor(m.senderAccountId), dark: t.dark))),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: Text(m.senderName, style: ts(13, weight: 700, color: nameColor(hueFor(m.senderAccountId), dark: t.dark)))),
+          OfficialBadge(senderOfficial, size: 13, gap: 4),
+        ]),
       ));
     }
     if (m.forwarded && !m.deleted) {

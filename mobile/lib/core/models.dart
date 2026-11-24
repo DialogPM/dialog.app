@@ -13,6 +13,13 @@ List<T> _list<T>(Object? v, T Function(Json) f) =>
 List<String> _strings(Object? v) => v is List ? v.map((e) => e.toString()).toList() : <String>[];
 Json? _map(Object? v) => v is Map ? Json.from(v) : null;
 
+/// The operator's badge label (`official`): only a non-empty string counts. The core sends it
+/// only after checking the operator's signature; an older core leaves the field out.
+String? _official(Object? v) {
+  final s = v is String ? v.trim() : null;
+  return s == null || s.isEmpty ? null : s;
+}
+
 class ServerInfo {
   final String url;
   final String name;
@@ -120,10 +127,17 @@ class Profile {
   final String about;
   final String? avatarPath;
 
-  const Profile({required this.name, required this.about, this.avatarPath});
+  /// Our own official badge (set by the server operator), null for ordinary accounts.
+  final String? official;
 
-  factory Profile.fromJson(Json j) =>
-      Profile(name: _str(j['name']) ?? '', about: _str(j['about']) ?? '', avatarPath: _str(j['avatar_path']));
+  const Profile({required this.name, required this.about, this.avatarPath, this.official});
+
+  factory Profile.fromJson(Json j) => Profile(
+        name: _str(j['name']) ?? '',
+        about: _str(j['about']) ?? '',
+        avatarPath: _str(j['avatar_path']),
+        official: _official(j['official']),
+      );
 }
 
 class Contact {
@@ -140,6 +154,10 @@ class Contact {
   final bool blocked;
   final bool verified;
 
+  /// Badge label of an account the server operator marked as official (signature checked by
+  /// the core), null otherwise. Not the same as [verified] (safety number compared by the user).
+  final String? official;
+
   const Contact({
     required this.accountId,
     required this.number,
@@ -151,6 +169,7 @@ class Contact {
     this.phone,
     required this.blocked,
     required this.verified,
+    this.official,
   });
 
   factory Contact.fromJson(Json j) => Contact(
@@ -164,6 +183,7 @@ class Contact {
         phone: _str(j['phone']),
         blocked: _bool(j['blocked']),
         verified: _bool(j['verified']),
+        official: _official(j['official']),
       );
 }
 
@@ -256,6 +276,10 @@ class Conversation {
   /// Direct chats: the peer is in our contacts (calls with anyone else are relayed).
   final bool peerIsContact;
 
+  /// Direct chats: the peer's official badge label (checked by the core), null otherwise and
+  /// for groups.
+  final String? official;
+
   const Conversation({
     required this.id,
     required this.kind,
@@ -279,6 +303,7 @@ class Conversation {
     required this.updatedAt,
     this.accepted = true,
     this.peerIsContact = false,
+    this.official,
   });
 
   bool get isGroup => kind == 'group';
@@ -319,6 +344,8 @@ class Conversation {
         updatedAt: _int(j['updated_at']),
         accepted: j['accepted'] != false,
         peerIsContact: _bool(j['peer_is_contact']),
+        // A group never carries a badge, whatever the payload says.
+        official: _str(j['kind']) == 'group' ? null : _official(j['official']),
       );
 }
 
@@ -1071,6 +1098,9 @@ class FoundAccount {
   final String? avatarPath;
   final bool isMe;
 
+  /// Official badge label (checked by the core), null otherwise.
+  final String? official;
+
   const FoundAccount({
     required this.accountId,
     required this.number,
@@ -1078,6 +1108,7 @@ class FoundAccount {
     required this.displayName,
     this.avatarPath,
     required this.isMe,
+    this.official,
   });
 
   factory FoundAccount.fromJson(Json j) => FoundAccount(
@@ -1087,6 +1118,7 @@ class FoundAccount {
         displayName: _str(j['display_name']) ?? '',
         avatarPath: _str(j['avatar_path']),
         isMe: _bool(j['is_me']),
+        official: _official(j['official']),
       );
 }
 
@@ -1129,6 +1161,44 @@ class Presence {
 
   factory Presence.fromJson(Json j) =>
       Presence(accountId: _str(j['account_id']) ?? '', online: _bool(j['online']), lastSeen: _intOrNull(j['last_seen']));
+}
+
+/// A notice from the operator of our server ("maintenance tonight", "update required"). The
+/// core keeps only notices whose operator signature checks out. Plain text: [body] is shown as
+/// is (line breaks kept), never parsed as markdown or links.
+class Notice {
+  final int id;
+  final String title;
+  final String body;
+  final int createdAt;
+  final int receivedAt;
+  final bool read;
+
+  const Notice({required this.id, required this.title, required this.body, required this.createdAt, required this.receivedAt, required this.read});
+
+  Notice markedRead() => Notice(id: id, title: title, body: body, createdAt: createdAt, receivedAt: receivedAt, read: true);
+
+  factory Notice.fromJson(Json j) => Notice(
+        id: _int(j['id']),
+        title: _str(j['title']) ?? '',
+        body: _str(j['body']) ?? '',
+        createdAt: _int(j['created_at']),
+        receivedAt: _int(j['received_at']),
+        read: _bool(j['read']),
+      );
+}
+
+/// Result of `list_notices`: newest first, with the unread count.
+class NoticeList {
+  final List<Notice> notices;
+  final int unread;
+
+  const NoticeList({required this.notices, required this.unread});
+
+  factory NoticeList.fromJson(Json j) {
+    final notices = _list(j['notices'], Notice.fromJson);
+    return NoticeList(notices: notices, unread: j['unread'] is num ? _int(j['unread']) : notices.where((n) => !n.read).length);
+  }
 }
 
 // ---------------------------------------------------------------------------

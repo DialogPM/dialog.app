@@ -17,6 +17,11 @@ const _callNotificationId = 2;
 const kProfilesPayload = 'profiles';
 /// Payload prefix of an incoming-call notification (followed by the call id).
 const kCallPayload = 'call:';
+/// Payload of a notice from the server operator: opens the notices page (app/nav.dart). It goes
+/// through [Notifications.onOpen] / [Notifications.launchConversation] like a conversation id.
+const kNoticesPayload = 'notices';
+/// One notification for the server's notices: a newer one replaces it, the page lists them all.
+const _noticeNotificationId = 3;
 
 class Notifications {
   Notifications._();
@@ -166,6 +171,40 @@ class Notifications {
     } catch (e) {
       debugPrint('notification failed: $e');
     }
+  }
+
+  /// A notice from the server operator (title names the server, see events.dart).
+  Future<void> showNotice({required String title, required String body, bool sound = true}) async {
+    if (!_ready) return;
+    try {
+      await _plugin.show(
+        id: _noticeNotificationId,
+        title: title,
+        body: body,
+        payload: kNoticesPayload,
+        notificationDetails: NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            'Messages',
+            importance: Importance.high,
+            priority: Priority.high,
+            playSound: sound,
+            visibility: NotificationVisibility.private,
+          ),
+          iOS: DarwinNotificationDetails(presentSound: sound, presentAlert: true, presentBanner: true),
+          linux: LinuxNotificationDetails(suppressSound: !sound),
+        ),
+      );
+    } catch (e) {
+      debugPrint('notification failed: $e');
+    }
+  }
+
+  Future<void> cancelNotices() async {
+    if (!_ready) return;
+    try {
+      await _plugin.cancel(id: _noticeNotificationId);
+    } catch (_) {}
   }
 
   /// Generic notification without content (push in the background, test notification).

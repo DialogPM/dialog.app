@@ -10,12 +10,14 @@ import '../../app/nav.dart';
 import '../../core/models.dart';
 import '../../l10n/i18n.dart';
 import '../../state/dnd.dart';
+import '../../state/notices.dart';
 import '../../state/prefs.dart';
 import '../../state/store.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../state/actions.dart';
 import '../../widgets/ui.dart';
 import 'chat_actions.dart';
@@ -139,6 +141,7 @@ class _ChatsPaneState extends ConsumerState<ChatsPane> {
             ),
             const SizedBox(width: 6),
           ],
+          const NoticesBell(),
           IconBtn('edit', size: 38, iconSize: 19, tooltip: context.t('newChat.title'), onPressed: openNewChat),
           const SizedBox(width: 4),
           IconBtn('more', size: 38, iconSize: 19, tooltip: context.t('common.more'), onPressed: _more),
@@ -246,6 +249,43 @@ class LockNote extends StatelessWidget {
   }
 }
 
+/// Bell on the chat list header: the notices from the server operator, with a dot while some
+/// are unread. Hidden when the core does not support notices (older core).
+class NoticesBell extends StatelessWidget {
+  const NoticesBell({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tk;
+    return ValueListenableBuilder<NoticesState>(
+      valueListenable: noticesState,
+      builder: (context, s, _) {
+        if (!s.supported) return const SizedBox.shrink();
+        final title = context.t('mobile.notices.title');
+        return Padding(
+          padding: const EdgeInsetsDirectional.only(end: 4),
+          child: Stack(clipBehavior: Clip.none, children: [
+            IconBtn('bell', size: 38, iconSize: 19, tooltip: s.unread > 0 ? '$title · ${context.t('mobile.notices.new')}' : title, onPressed: openNotices),
+            if (s.unread > 0)
+              PositionedDirectional(
+                top: 7,
+                end: 8,
+                child: IgnorePointer(
+                  child: Container(
+                    key: const ValueKey('notices-dot'),
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(color: t.danger, shape: BoxShape.circle, border: Border.all(color: t.pane, width: 1.5)),
+                  ),
+                ),
+              ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
 class _EmptyList extends StatelessWidget {
   const _EmptyList({required this.filter});
   final String filter;
@@ -307,6 +347,7 @@ class ChatListItem extends ConsumerWidget {
     final t = context.tk;
     final lang = context.lang;
     final verified = ref.watch(storeProvider.select((s) => conv.peerAccountId == null ? false : (s.contacts[conv.peerAccountId]?.verified ?? false)));
+    final official = ref.watch(storeProvider.select((s) => conversationOfficial(conv, s.contacts)));
     final typing = typingText(context, conv, ref.watch(storeProvider.select((s) => s.typing[conv.id])));
     final muted = conv.isMuted();
     final last = conv.lastMessage;
@@ -394,6 +435,7 @@ class ChatListItem extends ConsumerWidget {
                 Expanded(
                   child: Row(children: [
                     Flexible(child: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15.5, weight: 650, color: t.ink))),
+                    OfficialBadge(official, size: 15),
                     if (verified) ...[const SizedBox(width: 6), AppIcon('shield', size: 14, color: t.accentText, semanticLabel: context.t('safety.verified'))],
                   ]),
                 ),
@@ -628,7 +670,10 @@ class _FoundAccountRowState extends State<_FoundAccountRow> {
           const SizedBox(width: 13),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(f.displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15.5, weight: 650, color: t.ink)),
+              Row(children: [
+                Flexible(child: Text(f.displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15.5, weight: 650, color: t.ink))),
+                OfficialBadge(f.official, size: 15),
+              ]),
               Text(f.isMe ? context.t('mobile.itsYou') : sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(13, color: t.muted)),
             ]),
           ),

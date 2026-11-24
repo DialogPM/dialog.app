@@ -12,6 +12,7 @@ import '../../state/store.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/toast.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import '../chats/contact_picker.dart';
 
@@ -148,8 +149,15 @@ class _ContactCardState extends ConsumerState<_ContactCard> {
             const SizedBox(width: 11),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(isMe ? '$name (${context.t('contactCard.you')})' : name,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14.5, weight: 700, color: widget.fg)),
+                // The badge comes from our own contact record (checked by the core), never from
+                // the card the sender wrote.
+                Row(children: [
+                  Flexible(
+                    child: Text(isMe ? '$name (${context.t('contactCard.you')})' : name,
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14.5, weight: 700, color: widget.fg)),
+                  ),
+                  OfficialBadge(known?.official, size: 15),
+                ]),
                 const SizedBox(height: 2),
                 Text(formatAccountNumber(c.number), style: ts(12, color: widget.meta, mono: true)),
               ]),

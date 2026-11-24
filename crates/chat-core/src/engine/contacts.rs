@@ -41,19 +41,24 @@ impl Inner {
         }
         let entry: Result<DirectoryEntryDto> =
             self.session()?.api.get(&format!("/v1/directory/account/{account_id}")).await;
-        let now = now_ms();
+        // `updated_at` 0: this row is not a change of the user's. The contact as our other
+        // devices know it (name, blocked, verified; engine/vault.rs) must win over it, also
+        // when its vault record arrives after a message that made us create the row.
         match entry {
             Ok(e) => {
                 self.db.borrow().conn.execute(
-                    "INSERT INTO contacts (account_id, number, updated_at) VALUES (?1, ?2, ?3)
+                    "INSERT INTO contacts (account_id, number, updated_at) VALUES (?1, ?2, 0)
                      ON CONFLICT(account_id) DO UPDATE SET number = excluded.number",
-                    params![account_id, e.number, now],
+                    params![account_id, e.number],
                 )?;
+                if e.account_id == account_id {
+                    self.apply_badge(account_id, self.entry_badge(&e).as_deref())?;
+                }
             }
             Err(e) if e.is_network() => {
                 self.db.borrow().conn.execute(
-                    "INSERT OR IGNORE INTO contacts (account_id, number, updated_at) VALUES (?1, '', ?2)",
-                    params![account_id, now],
+                    "INSERT OR IGNORE INTO contacts (account_id, number, updated_at) VALUES (?1, '', 0)",
+                    [account_id],
                 )?;
             }
             Err(e) => return Err(e),
@@ -62,19 +67,19 @@ impl Inner {
     }
 
     pub fn contact_model(&self, account_id: &str) -> Result<Contact> {
-        type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, bool);
+        type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, bool, Option<String>);
         let row: Option<Row> = self
             .db
             .borrow()
             .conn
             .query_row(
-                "SELECT number, profile_name, about, avatar_path, local_name, phone, blocked, verified FROM contacts WHERE account_id = ?1",
+                "SELECT number, profile_name, about, avatar_path, local_name, phone, blocked, verified, official FROM contacts WHERE account_id = ?1",
                 [account_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
             )
             .optional()?;
-        let (number, profile_name, about, avatar_path, local_name, phone, blocked, verified) =
-            row.unwrap_or((String::new(), None, None, None, None, None, false, false));
+        let (number, profile_name, about, avatar_path, local_name, phone, blocked, verified, official) =
+            row.unwrap_or((String::new(), None, None, None, None, None, false, false, None));
         let profile_name = profile_name.filter(|n| !n.trim().is_empty());
         let local_name = local_name.filter(|n| !n.trim().is_empty());
         let display_name = local_name
@@ -92,6 +97,7 @@ impl Inner {
             phone,
             blocked,
             verified,
+            official,
         })
     }
 
@@ -124,7 +130,7 @@ impl Inner {
             .unwrap_or(false)
     }
 
-    fn emit_contact(&self, account_id: &str) {
+    pub(super) fn emit_contact(&self, account_id: &str) {
         if let Ok(c) = self.contact_model(account_id) {
             self.emit("contact_updated", &c);
         }
@@ -164,6 +170,7 @@ impl Inner {
                 local_name = COALESCE(excluded.local_name, contacts.local_name), updated_at = excluded.updated_at",
             params![entry.account_id, entry.number, name, now_ms()],
         )?;
+        self.store_badge(&entry.account_id, self.entry_badge(&entry).as_deref())?;
         self.vault_put_contact(&entry.account_id);
         self.emit_contact(&entry.account_id);
         self.contact_model(&entry.account_id)
@@ -198,9 +205,17 @@ impl Inner {
             Err(e) if e.code == ErrorCode::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
+        let is_me = entry.account_id == s.account.account_id;
+        let official = self.entry_badge(&entry);
+        if is_me {
+            self.set_own_badge(official.clone())?;
+        } else {
+            self.apply_badge(&entry.account_id, official.as_deref())?;
+        }
         let known = self.contact_model(&entry.account_id)?;
         Ok(Some(FoundAccount {
-            is_me: entry.account_id == s.account.account_id,
+            is_me,
+            official,
             display_name: if known.number.is_empty() {
                 entry.username.clone().map(|u| format!("@{u}")).unwrap_or_else(|| Self::number_label(&entry.number))
             } else {
@@ -345,6 +360,9 @@ impl Inner {
                 if account_id != s.account.account_id {
                     self.kt_require(account_id, &raw).await?;
                     self.pin_identity(account_id, &raw)?;
+                    if e.account_id == account_id {
+                        self.apply_badge(account_id, self.entry_badge(&e).as_deref())?;
+                    }
                     // Shared with our other devices like any pin (store.rs), when the contact exists.
                     self.db.borrow().conn.execute(
                         "INSERT OR IGNORE INTO vault_dirty (logical_id) SELECT 'contact:' || account_id FROM contacts WHERE account_id = ?1",
@@ -643,8 +661,14 @@ impl Inner {
         };
         let plain = crypto::aead_open(&key, &unb64(&dto.data)?, PROFILE_AAD)?;
         let data: ProfileData = serde_json::from_slice(&plain)?;
+        // The badge, checked against the identity key this device holds for the account; with
+        // none known yet, the stored badge stays as it was.
+        let badge = self.judge_badge(account_id, None, dto.badge.as_ref());
         if is_me {
             let mut p = self.get_profile()?;
+            if let Some(official) = badge {
+                p.official = official;
+            }
             p.name = data.name;
             p.about = data.about;
             if data.avatar != self.profile_avatar_ref()? {
@@ -678,6 +702,9 @@ impl Inner {
             Some(a) => (Some(a.cdn_id.clone()), Some(self.download_avatar(a, account_id).await?)),
             None => (None, None),
         };
+        if let Some(official) = &badge {
+            self.store_badge(account_id, official.as_deref())?;
+        }
         {
             let db = self.db.borrow();
             db.conn.execute(

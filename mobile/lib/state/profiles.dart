@@ -18,6 +18,7 @@ import 'actions.dart';
 import 'calls.dart';
 import 'dnd.dart';
 import 'group_calls.dart';
+import 'notices.dart';
 import 'push_handling.dart' show onPushSessionEnded;
 import 'store.dart';
 
@@ -60,6 +61,8 @@ Future<void> reloadAfterProfileSwitch({required bool opened}) async {
   // Drops every page and value of the previous session (the root shows the splash meanwhile).
   store.set((_) => const AppData());
   applyDnd(0);
+  // The other account's notices must not show for a moment under this one.
+  resetNotices();
   try {
     final s = await backend.getState();
     store.set((d) => d.copyWith(appState: s));

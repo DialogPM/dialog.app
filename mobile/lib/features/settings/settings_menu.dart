@@ -8,12 +8,14 @@ import '../../app/nav.dart';
 import '../../core/backend.dart' show parseError;
 import '../../core/models.dart';
 import '../../l10n/i18n.dart';
+import '../../state/notices.dart';
 import '../../state/profiles.dart';
 import '../../state/store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_icon.dart';
 import '../../state/actions.dart' show errorText;
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/ui.dart';
 import 'logout.dart';
@@ -77,12 +79,17 @@ class SettingsMenu extends ConsumerWidget {
             onTap: () => openSettingsSection('profile'),
             leading: Avatar(name: (profile?.name.isNotEmpty ?? false) ? profile!.name : '?', path: profile?.avatarPath, seed: 'me', size: 58),
             body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                (profile?.name.isNotEmpty ?? false) ? profile!.name : context.t('settings.profile.noName'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: ts(17, weight: 700, color: t.ink),
-              ),
+              Row(children: [
+                Flexible(
+                  child: Text(
+                    (profile?.name.isNotEmpty ?? false) ? profile!.name : context.t('settings.profile.noName'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts(17, weight: 700, color: t.ink),
+                  ),
+                ),
+                OfficialBadge(profile?.official, size: 17),
+              ]),
               Text(
                 (profile?.about.isNotEmpty ?? false) ? profile!.about : context.t('settings.profile.aboutPlaceholder'),
                 maxLines: 1,
@@ -107,6 +114,26 @@ class SettingsMenu extends ConsumerWidget {
                 Text(hint(key), maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: t.muted)),
               ]),
             ),
+          // Notices from the server operator (also on the chat list bell); none on an older core.
+          ValueListenableBuilder<NoticesState>(
+            valueListenable: noticesState,
+            builder: (context, s, _) => !s.supported
+                ? const SizedBox.shrink()
+                : row(
+                    onTap: openNotices,
+                    leading: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(color: t.sunk, borderRadius: BorderRadius.circular(11)),
+                      child: Center(child: AppIcon('server', size: 19, color: t.accentText)),
+                    ),
+                    body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(context.t('mobile.notices.title'), style: ts(15, weight: 600, color: t.ink)),
+                      Text(context.t('mobile.notices.menuHint'), maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: t.muted)),
+                    ]),
+                    trailing: s.unread > 0 ? SoftBadge(context.t('mobile.notices.new')) : null,
+                  ),
+          ),
           const SizedBox(height: 8),
           const _QuickAccounts(),
           // Keeps this account on the phone (locked, still logged in) and opens the start screen.

@@ -20,6 +20,7 @@ import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import '../chats/chat_actions.dart';
 import '../chats/chat_list.dart';
@@ -234,6 +235,7 @@ class _ChatHeader extends ConsumerWidget {
     final t = context.tk;
     final sub = conversationSubtitle(context, ref, conv);
     final verified = ref.watch(storeProvider.select((s) => conv.peerAccountId == null ? false : (s.contacts[conv.peerAccountId]?.verified ?? false)));
+    final official = ref.watch(storeProvider.select((s) => conversationOfficial(conv, s.contacts)));
     final blocked = ref.watch(storeProvider.select((s) => conv.peerAccountId != null ? (s.contacts[conv.peerAccountId]?.blocked ?? conv.blocked) : conv.blocked));
     return Container(
       height: 66,
@@ -256,6 +258,7 @@ class _ChatHeader extends ConsumerWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
                     Row(children: [
                       Flexible(child: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(16, weight: 700, color: t.ink))),
+                      OfficialBadge(official, size: 16),
                       if (verified) ...[const SizedBox(width: 6), AppIcon('shield', size: 15, color: t.accentText)],
                       if (conv.disappearingSeconds > 0) ...[
                         const SizedBox(width: 6),

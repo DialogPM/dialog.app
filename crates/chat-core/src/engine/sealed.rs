@@ -55,7 +55,7 @@ fn sealed_inner_kind(t: CiphertextMessageType) -> Option<u8> {
 }
 
 /// Account ids are UUIDs: the same account whatever the letter case.
-fn same_account(a: &str, b: &str) -> bool {
+pub(super) fn same_account(a: &str, b: &str) -> bool {
     match (uuid::Uuid::parse_str(a), uuid::Uuid::parse_str(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => a.eq_ignore_ascii_case(b),

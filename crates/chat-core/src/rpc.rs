@@ -115,6 +115,10 @@ pub struct NameReq {
     name: String,
 }
 #[derive(Deserialize)]
+pub struct NoticeIdReq {
+    id: i64,
+}
+#[derive(Deserialize)]
 pub struct AccountIdReq {
     account_id: String,
 }
@@ -512,4 +516,8 @@ rpc_table! {
     kt_contact_status(req: AccountIdReq) -> KtContactStatus => |i| i.kt_contact_status(&req.account_id).await;
     kt_check_now() -> KtOverview => |i| i.kt_check_now().await;
     kt_dismiss_alerts() -> () => |i| i.kt_dismiss_alerts();
+    // Notices from the operator of the server (engine/operator.rs).
+    list_notices() -> crate::engine::operator::NoticeList => |i| i.list_notices();
+    mark_notices_read() -> Value => |i| i.mark_notices_read();
+    delete_notice(req: NoticeIdReq) -> Value => |i| i.delete_notice(req.id);
 }

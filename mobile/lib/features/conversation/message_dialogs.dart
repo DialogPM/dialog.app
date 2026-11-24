@@ -12,6 +12,7 @@ import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import '../chats/chat_list.dart';
 import '../chats/contact_picker.dart';
@@ -61,6 +62,7 @@ class _ForwardPageState extends ConsumerState<_ForwardPage> {
     final q = _query.text.trim().toLowerCase();
     final list = ref.watch(storeProvider.select((s) => s.conversations)).values.where((c) => !c.left && !c.blocked && (q.isEmpty || c.title.toLowerCase().contains(q))).toList()
       ..sort((a, b) => b.sortTime.compareTo(a.sortTime));
+    final contacts = ref.watch(storeProvider.select((s) => s.contacts));
     return PaneScaffold(
       header: PaneHeader(title: context.t('message.forwardTitle', count: widget.ids.length), backIcon: 'x'),
       body: Column(children: [
@@ -77,6 +79,7 @@ class _ForwardPageState extends ConsumerState<_ForwardPage> {
               return PickRow(
                 leading: Avatar(name: c.title, path: c.avatarPath, seed: c.id, size: 40, group: c.isGroup),
                 title: c.title,
+                titleTrailing: OfficialBadge(conversationOfficial(c, contacts), size: 15),
                 onTap: () => setState(() => on ? _targets.remove(c.id) : _targets.add(c.id)),
                 trailing: CheckBox(on: on, round: true),
               );

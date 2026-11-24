@@ -17,6 +17,7 @@ import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/qr.dart';
 import '../../widgets/ui.dart';
 import '../groups/invite_pages.dart';
@@ -334,11 +335,13 @@ class _ContactInfo extends ConsumerWidget {
     final blocked = contact?.blocked ?? conv.blocked;
     final name = contact?.displayName ?? conv.title;
     final muted = conv.isMuted();
+    final official = ref.watch(storeProvider.select((s) => conversationOfficial(conv, s.contacts)));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _Hero(
         avatar: Avatar(name: conv.title, path: contact?.avatarPath ?? conv.avatarPath, seed: conv.id, size: 112),
         name: name,
         nameTrailing: [
+          OfficialBadge(official, size: 20, gap: 7),
           if (contact?.verified ?? false) ...[const SizedBox(width: 7), AppIcon('shield', size: 18, color: t.accentText)],
           if (contact != null) ...[
             const SizedBox(width: 4),
@@ -360,6 +363,11 @@ class _ContactInfo extends ConsumerWidget {
               ]),
             ),
           if (contact?.profileName != null && contact?.localName != null) Text('~${contact!.profileName}', style: ts(12.5, color: t.muted)),
+          if (official != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: OfficialLine(official, hint: context.t('mobile.official.hint'), center: true),
+            ),
         ],
         actions: [
           _Action('search', context.t('info.search'), () => _searchInChat(context, conv.id)),
@@ -886,7 +894,10 @@ class _MemberRow extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14.5, weight: 600, color: t.ink)),
+            Row(children: [
+              Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14.5, weight: 600, color: t.ink))),
+              OfficialBadge(m.isMe ? profile?.official : contact?.official, size: 14),
+            ]),
             Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: t.muted)),
           ]),
         ),

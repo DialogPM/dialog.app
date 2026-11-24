@@ -927,6 +927,7 @@ impl Inner {
                 role: m.role.clone(),
                 is_me,
                 verified: is_me || self.is_attested_member(&gid, &m.account_id),
+                official: if is_me { self.get_profile()?.official } else { c.official },
             });
         }
         members.sort_by_key(|m| (!m.is_me, m.role != "admin", m.display_name.to_lowercase()));

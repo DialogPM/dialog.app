@@ -153,6 +153,8 @@ abstract final class Events {
   static const mediaRetentionChanged = 'media_retention_changed';
   static const mediaCheck = 'media_check';
   static const defaultDisappearingChanged = 'default_disappearing_changed';
+  static const notice = 'notice';
+  static const noticesChanged = 'notices_changed';
 }
 
 /// Signaling message of a call (see crates/chat-core/src/engine/calls.rs).
@@ -353,6 +355,10 @@ class Backend {
   Stream<int> get onDefaultDisappearingChanged => _on(Events.defaultDisappearingChanged, (e) => _defaultTimer(e.json));
   /// A media check ran in the core (start, after each retention pass, on demand).
   Stream<MediaCheck> get onMediaCheck => _on(Events.mediaCheck, (e) => MediaCheck.fromJson(e.json));
+  /// A notice from the server operator arrived (signature already checked by the core).
+  Stream<Notice> get onNotice => _on(Events.notice, (e) => Notice.fromJson(e.json));
+  /// The number of unread notices changed (read here or on another device, deleted).
+  Stream<int> get onNoticesChanged => _on(Events.noticesChanged, (e) => e.json['unread'] is num ? (e.json['unread'] as num).toInt() : 0);
   Stream<LoggedOutEvent> get onLoggedOut => _on(Events.loggedOut, (e) => LoggedOutEvent.fromJson(e.json));
 
   Future<void> dispose() async {
@@ -622,6 +628,16 @@ class Backend {
       KtContactStatus.fromJson(await _obj('kt_contact_status', {'account_id': accountId}));
   Future<KtOverview> ktCheckNow() async => KtOverview.fromJson(await _obj('kt_check_now'));
   Future<void> ktDismissAlerts() => call('kt_dismiss_alerts');
+
+  // --- notices from the server operator ----------------------------------------
+  Future<NoticeList> listNotices() async => NoticeList.fromJson(await _obj('list_notices'));
+  /// Returns the unread count left (0).
+  Future<int> markNoticesRead() async {
+    final v = await call('mark_notices_read');
+    return v is Map && v['unread'] is num ? (v['unread'] as num).toInt() : 0;
+  }
+
+  Future<void> deleteNotice(int id) => call('delete_notice', {'id': id});
 
   /// Registers the push token of this device: [provider] "fcm" (FCM registration token) or
   /// "apns_voip" (iOS PushKit token, calls only; an empty token removes it).

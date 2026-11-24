@@ -44,6 +44,8 @@ enum ServerEvent {
     KeysLow,
     GroupUpdated { group_id: String, revision: i64 },
     AccountDeleted,
+    /// The operator published a notice for us or for everyone (engine/operator.rs).
+    OperatorNotice,
     #[serde(other)]
     Unknown,
 }
@@ -297,6 +299,8 @@ impl Inner {
                     // Devices added or logins waiting while we were offline.
                     self.spawn_device_check();
                     self.spawn_login_requests_refresh();
+                    // Notices published while we were offline.
+                    self.spawn_notices_fetch();
                     let me = self.clone();
                     tokio::task::spawn_local(async move {
                         if let Err(e) = me.refresh_keys().await {
@@ -334,6 +338,7 @@ impl Inner {
                             }
                         });
                     }
+                    ServerEvent::OperatorNotice => self.spawn_notices_fetch(),
                     ServerEvent::AccountDeleted => {
                         end = SocketEnd::AccountDeleted;
                         break;

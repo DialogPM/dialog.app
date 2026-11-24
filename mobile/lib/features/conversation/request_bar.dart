@@ -12,6 +12,7 @@ import '../../l10n/i18n.dart';
 import '../../state/actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 
 /// Downloads an attachment, asking first when it comes from a message request (nothing from a
@@ -95,10 +96,17 @@ class _RequestBarState extends State<RequestBar> {
   Widget build(BuildContext context) {
     final t = context.tk;
     final group = conv.isGroup;
+    // Only the operator-signed badge may say who is writing; the request's own name and text
+    // never get this line, whatever they claim.
+    final official = conversationOfficial(conv, appData.contacts);
     return Container(
       padding: EdgeInsets.fromLTRB(16, 14, 16, 14 + MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(color: t.pane, border: Border(top: BorderSide(color: t.line))),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (official != null) ...[
+          OfficialLine(official, text: context.t('mobile.official.request', args: {'label': official}), center: true),
+          const SizedBox(height: 10),
+        ],
         Text(
           context.t(group ? 'request.groupTitle' : 'request.title', args: {'name': conv.title}),
           textAlign: TextAlign.center,

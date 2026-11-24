@@ -8,7 +8,9 @@ import '../features/chats/new_group_page.dart';
 import '../features/chats/qr_sheet.dart';
 import '../features/conversation/conversation_page.dart';
 import '../features/info/info_page.dart';
+import '../features/notices/notices_page.dart';
 import '../features/settings/settings_pages.dart';
+import '../services/notifications.dart' show kNoticesPayload;
 import '../state/actions.dart';
 import 'globals.dart';
 
@@ -56,8 +58,31 @@ void openPendingChat() {
 }
 
 void openChatFromNotification(String conversationId) {
+  // A notice from the server operator: its payload is not a conversation id.
+  if (conversationId == kNoticesPayload) {
+    if (appData.appState?.ready != true) return;
+    if (appData.locked) {
+      _pendingChat = conversationId;
+      return;
+    }
+    openNotices();
+    return;
+  }
   if (appData.appState?.ready != true || !appData.conversations.containsKey(conversationId)) return;
   openChat(conversationId);
+}
+
+/// Opens the notices from the server operator (bell on the chat list, settings, a notification).
+void openNotices() {
+  final nav = _nav;
+  if (nav == null) return;
+  // Already on screen (a second notification tapped): nothing to push.
+  var onTop = false;
+  nav.popUntil((r) {
+    if (r.settings.name == 'notices') onTop = true;
+    return true;
+  });
+  if (!onTop) nav.push(pageRoute<void>(const NoticesPage(), name: 'notices'));
 }
 
 /// Opens (or creates) the direct chat with an account.

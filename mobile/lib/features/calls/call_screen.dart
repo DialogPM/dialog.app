@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../app/globals.dart';
 import '../../l10n/i18n.dart';
 import '../../services/voice_fx.dart';
 import '../../state/call_audio.dart';
@@ -17,6 +18,7 @@ import '../../state/group_calls.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import 'group_call_screen.dart';
 
@@ -276,7 +278,11 @@ class _CallScreenState extends State<_CallScreen> {
         Text(context.t('call.encrypted'), style: ts(12, color: _fg.withValues(alpha: 0.7))),
       ]),
       const SizedBox(height: 10),
-      Text(call.peerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(fullVideo ? 19 : 24, weight: 700, color: _fg)),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Text(call.peerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(fullVideo ? 19 : 24, weight: 700, color: _fg))),
+        // Who is calling: only the operator-signed badge says "official", never the name.
+        OfficialBadge(_official(call), size: fullVideo ? 17 : 20, gap: 8),
+      ]),
       const SizedBox(height: 4),
       Text(_status(context), style: ts(14, color: _fg.withValues(alpha: 0.8), mono: call.phase == CallPhase.active)),
       _QualityNotice(call: call),
@@ -482,6 +488,12 @@ class _CallScreenState extends State<_CallScreen> {
 
 /// Renders a MediaStream (video only; audio plays natively).
 /// "Weak connection" notice of an active call (state/call_audio.dart), and why our camera stopped.
+String? _official(CallState call) {
+  final conv = appData.conversations[call.conversationId];
+  if (conv != null) return conversationOfficial(conv, appData.contacts);
+  return appData.contacts[call.peerAccountId]?.official;
+}
+
 class _QualityNotice extends StatelessWidget {
   const _QualityNotice({required this.call});
   final CallState call;

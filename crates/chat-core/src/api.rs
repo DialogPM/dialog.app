@@ -109,6 +109,10 @@ pub struct ServerInfoDto {
     /// App versions the operator announces, per platform ("desktop" | "android" | "ios").
     #[serde(default)]
     pub client_versions: std::collections::HashMap<String, ClientVersionsDto>,
+    /// Ed25519 keys that sign the operator's statements (engine/operator.rs); absent on
+    /// servers without an admin API.
+    #[serde(default)]
+    pub operator_keys: Vec<String>,
 }
 
 /// One platform's entry of `client_versions`: versions "major.minor.patch".
@@ -268,6 +272,9 @@ pub struct DirectoryEntryDto {
     pub identity_key: String,
     #[serde(default)]
     pub username: Option<String>,
+    /// The badge of an official account (engine/operator.rs), as the server claims it.
+    #[serde(default)]
+    pub badge: Option<crate::engine::operator::BadgeDto>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -284,6 +291,9 @@ pub struct ProfileDto {
     pub avatar_id: Option<String>,
     #[serde(default)]
     pub updated_at: i64,
+    /// The badge of an official account (engine/operator.rs), as the server claims it.
+    #[serde(default)]
+    pub badge: Option<crate::engine::operator::BadgeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

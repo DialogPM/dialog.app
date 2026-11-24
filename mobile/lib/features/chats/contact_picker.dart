@@ -9,6 +9,7 @@ import '../../state/store.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import 'chat_list.dart';
 
@@ -18,7 +19,7 @@ Map<String, Contact> withChatPeers(Map<String, Contact> contacts, Iterable<Conve
   for (final c in conversations) {
     final id = c.peerAccountId, number = c.peerNumber;
     if (c.kind != 'direct' || id == null || number == null || all.containsKey(id)) continue;
-    all[id] = Contact(accountId: id, number: number, displayName: c.title, avatarPath: c.avatarPath, blocked: false, verified: false);
+    all[id] = Contact(accountId: id, number: number, displayName: c.title, avatarPath: c.avatarPath, blocked: false, verified: false, official: c.official);
   }
   return all;
 }
@@ -40,10 +41,13 @@ List<Contact> sortedContacts(Map<String, Contact> contacts, String filter) {
 
 /// Generic row (.row): 60px min height, avatar/icon, title and subtitle.
 class PickRow extends StatelessWidget {
-  const PickRow({super.key, required this.leading, required this.title, this.sub, this.onTap, this.trailing, this.titleColor});
+  const PickRow({super.key, required this.leading, required this.title, this.sub, this.onTap, this.trailing, this.titleColor, this.titleTrailing});
 
   final Widget leading;
   final String title;
+
+  /// Drawn right after the title (the official badge).
+  final Widget? titleTrailing;
   final String? sub;
   final VoidCallback? onTap;
   final Widget? trailing;
@@ -65,7 +69,10 @@ class PickRow extends StatelessWidget {
             const SizedBox(width: 13),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15, weight: 600, color: titleColor ?? t.ink)),
+                Row(children: [
+                  Flexible(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15, weight: 600, color: titleColor ?? t.ink))),
+                  ?titleTrailing,
+                ]),
                 if (sub != null) Text(sub!, maxLines: 2, overflow: TextOverflow.ellipsis, style: ts(12.5, color: t.muted, height: 1.4)),
               ]),
             ),
@@ -106,6 +113,7 @@ class ContactRow extends StatelessWidget {
   Widget build(BuildContext context) => PickRow(
         leading: Avatar(name: c.displayName, path: c.avatarPath, seed: c.accountId, size: avatarSize),
         title: c.displayName,
+        titleTrailing: hasOfficialLabel(c.official) ? OfficialBadge(c.official, size: 15) : null,
         sub: (c.about?.isNotEmpty ?? false) ? c.about : formatAccountNumber(c.number),
         onTap: onTap,
         trailing: trailing ?? (c.blocked ? SoftBadge(context.t('chat.block.blocked'), tone: 'danger') : null),

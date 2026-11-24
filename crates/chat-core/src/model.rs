@@ -59,6 +59,10 @@ pub struct Profile {
     pub name: String,
     pub about: String,
     pub avatar_path: Option<String>,
+    /// The label of our own official badge, verified against the pinned operator keys
+    /// (engine/operator.rs); None: not an official account.
+    #[serde(default)]
+    pub official: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,6 +77,9 @@ pub struct Contact {
     pub phone: Option<String>,
     pub blocked: bool,
     pub verified: bool,
+    /// The label of the account's official badge, verified against the pinned operator keys
+    /// (engine/operator.rs); None: not an official account.
+    pub official: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,6 +130,9 @@ pub struct Conversation {
     /// Direct chats: the peer is in our contacts. Calls with anyone else go through the TURN
     /// relay only, so they do not learn our IP address.
     pub peer_is_contact: bool,
+    /// Direct chats: the peer's verified official badge label (engine/operator.rs). None for
+    /// groups.
+    pub official: Option<String>,
 }
 
 /// Attachment as stored locally (superset of the UI type; keys are never sent to the UI).
@@ -370,6 +380,9 @@ pub struct GroupMember {
     pub is_me: bool,
     /// Confirmed end to end by an admin (false: listed only by the server).
     pub verified: bool,
+    /// The member's verified official badge label, as this device holds it for the contact
+    /// (engine/operator.rs); for ourselves, our own badge.
+    pub official: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -554,6 +567,23 @@ pub struct FoundAccount {
     pub display_name: String,
     pub avatar_path: Option<String>,
     pub is_me: bool,
+    /// The verified official badge label of the account (engine/operator.rs).
+    pub official: Option<String>,
+}
+
+/// A notice from the operator of the server, verified against the pinned operator keys
+/// (engine/operator.rs). Kept on this device only.
+#[derive(Debug, Clone, Serialize)]
+pub struct Notice {
+    /// The server's id (notices are fetched in id order).
+    pub id: i64,
+    pub title: String,
+    pub body: String,
+    /// When the operator signed it (ms).
+    pub created_at: i64,
+    /// When this device received it (ms).
+    pub received_at: i64,
+    pub read: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

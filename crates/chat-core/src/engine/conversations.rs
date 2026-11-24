@@ -189,6 +189,7 @@ impl Inner {
             updated_at: row.updated_at,
             accepted: self.conversation_accepted(row),
             peer_is_contact: row.peer_account_id.as_deref().is_some_and(|p| self.is_contact(p)),
+            official: None,
         };
         if let Some(peer) = &row.peer_account_id {
             let c = self.contact_model(peer)?;
@@ -196,6 +197,8 @@ impl Inner {
             conv.avatar_path = c.avatar_path;
             conv.peer_number = Some(c.number);
             conv.blocked = c.blocked;
+            // Our own badge lives on the profile (engine/operator.rs).
+            conv.official = if *peer == me { self.get_profile().ok().and_then(|p| p.official) } else { c.official };
         } else if let Some(g) = &row.group_id {
             let info: Option<(String, Option<String>, String, bool)> = self
                 .db

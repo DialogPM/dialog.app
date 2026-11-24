@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import '../app/globals.dart';
+import '../core/models.dart';
 import '../l10n/i18n.dart';
 import '../services/call_sounds.dart' show playMessageTone;
 import '../services/notifications.dart';
@@ -17,6 +18,7 @@ import 'media_retention.dart';
 import 'calls.dart';
 import 'dnd.dart';
 import 'group_calls.dart';
+import 'notices.dart';
 
 final _typingTimers = <String, Timer>{};
 final _subs = <StreamSubscription<dynamic>>[];
@@ -109,12 +111,35 @@ void startEventBridge() {
     backend.onCallSignal.listen((ev) => unawaited(handleCallSignal(ev))),
     backend.onGroupCall.listen((ev) => unawaited(handleGroupCall(ev))),
     backend.onGroupCallSignal.listen((ev) => unawaited(handleGroupCallSignal(ev))),
+    backend.onNotice.listen(_onNotice),
+    backend.onNoticesChanged.listen(applyNoticesUnread),
     backend.onLoggedOut.listen((p) {
       unawaited(hangUp());
       unawaited(Notifications.instance.cancelAll());
       signedOut(p.reason);
     }),
   ]);
+}
+
+/// A notice from the server operator: listed at once; read at once when its page is on screen,
+/// otherwise announced like a message (same do-not-disturb and notification preferences), with a
+/// title that names the server so it cannot pass for a chat. Tapping it opens the notices page.
+void _onNotice(Notice n) {
+  applyNotice(n);
+  if (noticesPageOpen && appInForeground) {
+    unawaited(markNoticesRead());
+    return;
+  }
+  if (n.read || dndActive()) return;
+  final p = prefs;
+  if (appInForeground && p.sound && callState.value == null) unawaited(playMessageTone(inChat: false));
+  if (!p.notifications) return;
+  final title = translate(currentLanguage, 'mobile.notices.notificationTitle', args: {'server': noticeServerName()});
+  // "Notification preview" off: no content on the lock screen, like messages.
+  final body = !p.notifPreview
+      ? tr('mobile.notices.notificationHidden')
+      : (n.title.trim().isNotEmpty ? n.title.trim() : n.body.trim());
+  unawaited(Notifications.instance.showNotice(title: title, body: body, sound: p.sound && !appInForeground));
 }
 
 void stopEventBridge() {

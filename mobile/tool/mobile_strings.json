@@ -118,6 +118,23 @@
         "row": "Battery optimization",
         "exempt": "{{appName}} may run in the background: calls and messages are not cut",
         "limited": "Restricted: calls may drop when the screen locks. Tap to allow."
+      },
+      "official": {
+        "label": "Official account · {{label}}",
+        "hint": "Confirmed and signed by the operator of your server. Anyone can put “support” or “admin” in their name; only accounts the operator vouches for carry this mark.",
+        "request": "This request comes from an official account: {{label}}",
+        "ownHint": "The operator of your server marked your account as official. Others see this mark next to your name."
+      },
+      "notices": {
+        "title": "Server notices",
+        "menuHint": "Announcements from the operator of your server",
+        "header": "Notices from the operator of {{server}}, the server your account is on. They are signed by the operator and checked by the app. They are not chat messages: nobody can reply to them.",
+        "empty": "No notices. Announcements from the operator of your server, such as maintenance or a required update, appear here.",
+        "new": "New",
+        "delete": "Delete notice",
+        "deleted": "Notice deleted",
+        "notificationTitle": "{{server}} · Notice",
+        "notificationHidden": "New notice from your server"
       }
     },
     "errors": {
@@ -248,6 +265,23 @@
         "row": "Optimizarea bateriei",
         "exempt": "{{appName}} poate rula în fundal: apelurile și mesajele nu sunt întrerupte",
         "limited": "Restricționat: apelurile se pot închide la blocarea ecranului. Atinge pentru a permite."
+      },
+      "official": {
+        "label": "Cont oficial · {{label}}",
+        "hint": "Confirmat și semnat de operatorul serverului tău. Oricine își poate pune „suport” sau „admin” în nume; doar conturile garantate de operator au acest semn.",
+        "request": "Cererea vine de la un cont oficial: {{label}}",
+        "ownHint": "Operatorul serverului tău ți-a marcat contul ca oficial. Ceilalți văd acest semn lângă numele tău."
+      },
+      "notices": {
+        "title": "Anunțuri de la server",
+        "menuHint": "Anunțuri de la operatorul serverului tău",
+        "header": "Anunțuri de la operatorul {{server}}, serverul pe care este contul tău. Sunt semnate de operator și verificate de aplicație. Nu sunt mesaje de chat: nimeni nu le poate răspunde.",
+        "empty": "Niciun anunț. Aici apar anunțurile operatorului serverului tău, de exemplu o mentenanță sau o actualizare obligatorie.",
+        "new": "Nou",
+        "delete": "Șterge anunțul",
+        "deleted": "Anunț șters",
+        "notificationTitle": "{{server}} · Anunț",
+        "notificationHidden": "Anunț nou de la serverul tău"
       }
     },
     "errors": {
@@ -379,6 +413,23 @@
         "row": "Ottimizzazione batteria",
         "exempt": "{{appName}} può funzionare in background: chiamate e messaggi non vengono interrotti",
         "limited": "Limitato: le chiamate possono chiudersi quando lo schermo si blocca. Tocca per consentire."
+      },
+      "official": {
+        "label": "Account ufficiale · {{label}}",
+        "hint": "Confermato e firmato dal gestore del tuo server. Chiunque può mettere “assistenza” o “admin” nel proprio nome; solo gli account garantiti dal gestore hanno questo segno.",
+        "request": "Questa richiesta proviene da un account ufficiale: {{label}}",
+        "ownHint": "Il gestore del tuo server ha contrassegnato il tuo account come ufficiale. Gli altri vedono questo segno accanto al tuo nome."
+      },
+      "notices": {
+        "title": "Avvisi del server",
+        "menuHint": "Comunicazioni dal gestore del tuo server",
+        "header": "Avvisi dal gestore di {{server}}, il server su cui si trova il tuo account. Sono firmati dal gestore e verificati dall'app. Non sono messaggi di chat: nessuno può rispondere.",
+        "empty": "Nessun avviso. Qui compaiono le comunicazioni del gestore del tuo server, come una manutenzione o un aggiornamento obbligatorio.",
+        "new": "Nuovo",
+        "delete": "Elimina avviso",
+        "deleted": "Avviso eliminato",
+        "notificationTitle": "{{server}} · Avviso",
+        "notificationHidden": "Nuovo avviso dal tuo server"
       }
     },
     "errors": {
@@ -509,6 +560,23 @@
         "row": "Akkuoptimierung",
         "exempt": "{{appName}} darf im Hintergrund laufen: Anrufe und Nachrichten werden nicht unterbrochen",
         "limited": "Eingeschränkt: Anrufe können abbrechen, wenn der Bildschirm gesperrt wird. Zum Erlauben tippen."
+      },
+      "official": {
+        "label": "Offizielles Konto · {{label}}",
+        "hint": "Vom Betreiber deines Servers bestätigt und signiert. Jeder kann „Support“ oder „Admin“ in seinen Namen schreiben; nur Konten, für die der Betreiber bürgt, tragen dieses Zeichen.",
+        "request": "Diese Anfrage kommt von einem offiziellen Konto: {{label}}",
+        "ownHint": "Der Betreiber deines Servers hat dein Konto als offiziell markiert. Andere sehen dieses Zeichen neben deinem Namen."
+      },
+      "notices": {
+        "title": "Server-Hinweise",
+        "menuHint": "Mitteilungen des Betreibers deines Servers",
+        "header": "Hinweise des Betreibers von {{server}}, dem Server, auf dem dein Konto liegt. Sie sind vom Betreiber signiert und von der App geprüft. Es sind keine Chatnachrichten: Niemand kann darauf antworten.",
+        "empty": "Keine Hinweise. Hier erscheinen Mitteilungen des Betreibers deines Servers, etwa zu Wartungsarbeiten oder einem nötigen Update.",
+        "new": "Neu",
+        "delete": "Hinweis löschen",
+        "deleted": "Hinweis gelöscht",
+        "notificationTitle": "{{server}} · Hinweis",
+        "notificationHidden": "Neuer Hinweis von deinem Server"
       }
     },
     "errors": {
@@ -639,6 +707,23 @@
         "row": "Optimización de batería",
         "exempt": "{{appName}} puede funcionar en segundo plano: las llamadas y los mensajes no se cortan",
         "limited": "Restringido: las llamadas pueden cortarse cuando se bloquea la pantalla. Toca para permitir."
+      },
+      "official": {
+        "label": "Cuenta oficial · {{label}}",
+        "hint": "Confirmada y firmada por el operador de tu servidor. Cualquiera puede poner «soporte» o «admin» en su nombre; solo las cuentas que el operador avala llevan esta marca.",
+        "request": "Esta solicitud viene de una cuenta oficial: {{label}}",
+        "ownHint": "El operador de tu servidor marcó tu cuenta como oficial. Los demás ven esta marca junto a tu nombre."
+      },
+      "notices": {
+        "title": "Avisos del servidor",
+        "menuHint": "Comunicados del operador de tu servidor",
+        "header": "Avisos del operador de {{server}}, el servidor donde está tu cuenta. Están firmados por el operador y verificados por la app. No son mensajes de chat: nadie puede responderlos.",
+        "empty": "No hay avisos. Aquí aparecen los comunicados del operador de tu servidor, como un mantenimiento o una actualización obligatoria.",
+        "new": "Nuevo",
+        "delete": "Eliminar aviso",
+        "deleted": "Aviso eliminado",
+        "notificationTitle": "{{server}} · Aviso",
+        "notificationHidden": "Nuevo aviso de tu servidor"
       }
     },
     "errors": {
@@ -769,6 +854,23 @@
         "row": "Optimisation de la batterie",
         "exempt": "{{appName}} peut fonctionner en arrière-plan : les appels et les messages ne sont pas coupés",
         "limited": "Restreint : les appels peuvent être coupés lorsque l'écran se verrouille. Touchez pour autoriser."
+      },
+      "official": {
+        "label": "Compte officiel · {{label}}",
+        "hint": "Confirmé et signé par l'opérateur de ton serveur. N'importe qui peut mettre « support » ou « admin » dans son nom ; seuls les comptes garantis par l'opérateur portent cette marque.",
+        "request": "Cette demande vient d'un compte officiel : {{label}}",
+        "ownHint": "L'opérateur de ton serveur a marqué ton compte comme officiel. Les autres voient cette marque à côté de ton nom."
+      },
+      "notices": {
+        "title": "Avis du serveur",
+        "menuHint": "Annonces de l'opérateur de ton serveur",
+        "header": "Avis de l'opérateur de {{server}}, le serveur où se trouve ton compte. Ils sont signés par l'opérateur et vérifiés par l'application. Ce ne sont pas des messages : personne ne peut y répondre.",
+        "empty": "Aucun avis. Les annonces de l'opérateur de ton serveur, comme une maintenance ou une mise à jour obligatoire, apparaissent ici.",
+        "new": "Nouveau",
+        "delete": "Supprimer l'avis",
+        "deleted": "Avis supprimé",
+        "notificationTitle": "{{server}} · Avis",
+        "notificationHidden": "Nouvel avis de ton serveur"
       }
     },
     "errors": {
@@ -899,6 +1001,23 @@
         "row": "Otimização de bateria",
         "exempt": "{{appName}} pode funcionar em segundo plano: chamadas e mensagens não são interrompidas",
         "limited": "Restrito: as chamadas podem cair quando a tela é bloqueada. Toque para permitir."
+      },
+      "official": {
+        "label": "Conta oficial · {{label}}",
+        "hint": "Confirmada e assinada pelo operador do seu servidor. Qualquer pessoa pode colocar “suporte” ou “admin” no nome; só as contas garantidas pelo operador têm esta marca.",
+        "request": "Este pedido vem de uma conta oficial: {{label}}",
+        "ownHint": "O operador do seu servidor marcou a sua conta como oficial. Os outros veem esta marca ao lado do seu nome."
+      },
+      "notices": {
+        "title": "Avisos do servidor",
+        "menuHint": "Comunicados do operador do seu servidor",
+        "header": "Avisos do operador de {{server}}, o servidor onde está a sua conta. São assinados pelo operador e verificados pela aplicação. Não são mensagens de conversa: ninguém lhes pode responder.",
+        "empty": "Sem avisos. Aqui aparecem os comunicados do operador do seu servidor, como uma manutenção ou uma atualização obrigatória.",
+        "new": "Novo",
+        "delete": "Eliminar aviso",
+        "deleted": "Aviso eliminado",
+        "notificationTitle": "{{server}} · Aviso",
+        "notificationHidden": "Novo aviso do seu servidor"
       }
     },
     "errors": {
@@ -1029,6 +1148,23 @@
         "row": "Batterijoptimalisatie",
         "exempt": "{{appName}} mag op de achtergrond werken: oproepen en berichten worden niet onderbroken",
         "limited": "Beperkt: oproepen kunnen wegvallen wanneer het scherm vergrendelt. Tik om toe te staan."
+      },
+      "official": {
+        "label": "Officieel account · {{label}}",
+        "hint": "Bevestigd en ondertekend door de beheerder van je server. Iedereen kan „support” of „admin” in zijn naam zetten; alleen accounts waar de beheerder voor instaat hebben dit teken.",
+        "request": "Dit verzoek komt van een officieel account: {{label}}",
+        "ownHint": "De beheerder van je server heeft je account als officieel gemarkeerd. Anderen zien dit teken naast je naam."
+      },
+      "notices": {
+        "title": "Servermeldingen",
+        "menuHint": "Mededelingen van de beheerder van je server",
+        "header": "Meldingen van de beheerder van {{server}}, de server waar je account op staat. Ze zijn ondertekend door de beheerder en gecontroleerd door de app. Het zijn geen chatberichten: niemand kan erop antwoorden.",
+        "empty": "Geen meldingen. Mededelingen van de beheerder van je server, zoals onderhoud of een verplichte update, verschijnen hier.",
+        "new": "Nieuw",
+        "delete": "Melding verwijderen",
+        "deleted": "Melding verwijderd",
+        "notificationTitle": "{{server}} · Melding",
+        "notificationHidden": "Nieuwe melding van je server"
       }
     },
     "errors": {
@@ -1159,6 +1295,23 @@
         "row": "Optymalizacja baterii",
         "exempt": "{{appName}} może działać w tle: połączenia i wiadomości nie są przerywane",
         "limited": "Ograniczone: połączenia mogą się zrywać po zablokowaniu ekranu. Dotknij, aby zezwolić."
+      },
+      "official": {
+        "label": "Oficjalne konto · {{label}}",
+        "hint": "Potwierdzone i podpisane przez operatora twojego serwera. Każdy może wpisać „wsparcie” lub „admin” w swojej nazwie; ten znak mają tylko konta, za które ręczy operator.",
+        "request": "Ta prośba pochodzi z oficjalnego konta: {{label}}",
+        "ownHint": "Operator twojego serwera oznaczył twoje konto jako oficjalne. Inni widzą ten znak obok twojej nazwy."
+      },
+      "notices": {
+        "title": "Komunikaty serwera",
+        "menuHint": "Ogłoszenia operatora twojego serwera",
+        "header": "Komunikaty od operatora {{server}}, serwera, na którym jest twoje konto. Są podpisane przez operatora i sprawdzone przez aplikację. To nie są wiadomości czatu: nikt nie może na nie odpowiedzieć.",
+        "empty": "Brak komunikatów. Tutaj pojawiają się ogłoszenia operatora twojego serwera, np. o przerwie technicznej lub wymaganej aktualizacji.",
+        "new": "Nowe",
+        "delete": "Usuń komunikat",
+        "deleted": "Komunikat usunięty",
+        "notificationTitle": "{{server}} · Komunikat",
+        "notificationHidden": "Nowy komunikat od twojego serwera"
       }
     },
     "errors": {
@@ -1291,6 +1444,23 @@
         "row": "Pil optimizasyonu",
         "exempt": "{{appName}} arka planda çalışabilir: aramalar ve mesajlar kesilmez",
         "limited": "Kısıtlı: ekran kilitlendiğinde aramalar kesilebilir. İzin vermek için dokunun."
+      },
+      "official": {
+        "label": "Resmi hesap · {{label}}",
+        "hint": "Sunucunun işletmecisi tarafından onaylanmış ve imzalanmıştır. Herkes adına “destek” veya “admin” yazabilir; bu işareti yalnızca işletmecinin kefil olduğu hesaplar taşır.",
+        "request": "Bu istek resmi bir hesaptan geliyor: {{label}}",
+        "ownHint": "Sunucunun işletmecisi hesabını resmi olarak işaretledi. Diğerleri bu işareti adının yanında görür."
+      },
+      "notices": {
+        "title": "Sunucu duyuruları",
+        "menuHint": "Sunucunun işletmecisinden duyurular",
+        "header": "Hesabının bulunduğu {{server}} sunucusunun işletmecisinden duyurular. İşletmeci tarafından imzalanır ve uygulama tarafından doğrulanır. Sohbet mesajı değildir: kimse yanıt veremez.",
+        "empty": "Duyuru yok. Sunucunun işletmecisinin bakım veya zorunlu güncelleme gibi duyuruları burada görünür.",
+        "new": "Yeni",
+        "delete": "Duyuruyu sil",
+        "deleted": "Duyuru silindi",
+        "notificationTitle": "{{server}} · Duyuru",
+        "notificationHidden": "Sunucundan yeni duyuru"
       }
     },
     "errors": {
@@ -1421,6 +1591,23 @@
         "row": "Оптимизация батареи",
         "exempt": "{{appName}} может работать в фоновом режиме: звонки и сообщения не прерываются",
         "limited": "Ограничено: звонки могут обрываться при блокировке экрана. Нажмите, чтобы разрешить."
+      },
+      "official": {
+        "label": "Официальный аккаунт · {{label}}",
+        "hint": "Подтверждён и подписан оператором вашего сервера. Любой может написать в имени «поддержка» или «админ»; этот знак есть только у аккаунтов, за которые ручается оператор.",
+        "request": "Этот запрос от официального аккаунта: {{label}}",
+        "ownHint": "Оператор вашего сервера отметил ваш аккаунт как официальный. Другие видят этот знак рядом с вашим именем."
+      },
+      "notices": {
+        "title": "Уведомления сервера",
+        "menuHint": "Объявления оператора вашего сервера",
+        "header": "Уведомления от оператора {{server}} — сервера, на котором находится ваш аккаунт. Они подписаны оператором и проверены приложением. Это не сообщения чата: ответить на них нельзя.",
+        "empty": "Уведомлений нет. Здесь появляются объявления оператора вашего сервера, например о технических работах или обязательном обновлении.",
+        "new": "Новое",
+        "delete": "Удалить уведомление",
+        "deleted": "Уведомление удалено",
+        "notificationTitle": "{{server}} · Уведомление",
+        "notificationHidden": "Новое уведомление от вашего сервера"
       }
     },
     "errors": {
@@ -1553,6 +1740,23 @@
         "row": "Оптимізація батареї",
         "exempt": "{{appName}} може працювати у фоновому режимі: дзвінки та повідомлення не перериваються",
         "limited": "Обмежено: дзвінки можуть обриватися під час блокування екрана. Торкніться, щоб дозволити."
+      },
+      "official": {
+        "label": "Офіційний акаунт · {{label}}",
+        "hint": "Підтверджено й підписано оператором вашого сервера. Будь-хто може написати в імені «підтримка» чи «адмін»; цей знак мають лише акаунти, за які ручається оператор.",
+        "request": "Цей запит від офіційного акаунта: {{label}}",
+        "ownHint": "Оператор вашого сервера позначив ваш акаунт як офіційний. Інші бачать цей знак поруч із вашим іменем."
+      },
+      "notices": {
+        "title": "Сповіщення сервера",
+        "menuHint": "Оголошення оператора вашого сервера",
+        "header": "Сповіщення від оператора {{server}} — сервера, на якому розміщено ваш акаунт. Вони підписані оператором і перевірені застосунком. Це не повідомлення чату: відповісти на них не можна.",
+        "empty": "Сповіщень немає. Тут з'являються оголошення оператора вашого сервера, наприклад про технічні роботи чи обов'язкове оновлення.",
+        "new": "Нове",
+        "delete": "Видалити сповіщення",
+        "deleted": "Сповіщення видалено",
+        "notificationTitle": "{{server}} · Сповіщення",
+        "notificationHidden": "Нове сповіщення від вашого сервера"
       }
     },
     "errors": {
@@ -1685,6 +1889,23 @@
         "row": "تحسين البطارية",
         "exempt": "يمكن لـ {{appName}} العمل في الخلفية: لا تنقطع المكالمات والرسائل",
         "limited": "مقيَّد: قد تنقطع المكالمات عند قفل الشاشة. انقر للسماح."
+      },
+      "official": {
+        "label": "حساب رسمي · {{label}}",
+        "hint": "مؤكَّد وموقَّع من مشغّل الخادم الذي تستخدمه. يمكن لأي شخص أن يضع «الدعم» أو «المشرف» في اسمه؛ لا يحمل هذه العلامة إلا الحسابات التي يضمنها المشغّل.",
+        "request": "هذا الطلب من حساب رسمي: {{label}}",
+        "ownHint": "وسم مشغّل خادمك حسابك بأنه رسمي. يرى الآخرون هذه العلامة بجانب اسمك."
+      },
+      "notices": {
+        "title": "إشعارات الخادم",
+        "menuHint": "إعلانات من مشغّل خادمك",
+        "header": "إشعارات من مشغّل {{server}}، الخادم الذي يوجد عليه حسابك. يوقّعها المشغّل ويتحقق منها التطبيق. وهي ليست رسائل دردشة: لا يمكن لأحد الرد عليها.",
+        "empty": "لا توجد إشعارات. تظهر هنا إعلانات مشغّل خادمك، مثل الصيانة أو تحديث إلزامي.",
+        "new": "جديد",
+        "delete": "حذف الإشعار",
+        "deleted": "تم حذف الإشعار",
+        "notificationTitle": "{{server}} · إشعار",
+        "notificationHidden": "إشعار جديد من خادمك"
       }
     },
     "errors": {
@@ -1819,6 +2040,23 @@
         "row": "بهینه‌سازی باتری",
         "exempt": "{{appName}} می‌تواند در پس‌زمینه اجرا شود: تماس‌ها و پیام‌ها قطع نمی‌شوند",
         "limited": "محدودشده: ممکن است تماس‌ها با قفل شدن صفحه قطع شوند. برای اجازه دادن ضربه بزنید."
+      },
+      "official": {
+        "label": "حساب رسمی · {{label}}",
+        "hint": "تأییدشده و امضاشده توسط گردانندهٔ سرور شما. هر کسی می‌تواند «پشتیبانی» یا «مدیر» را در نامش بگذارد؛ فقط حساب‌هایی که گرداننده ضامنشان است این نشان را دارند.",
+        "request": "این درخواست از یک حساب رسمی است: {{label}}",
+        "ownHint": "گردانندهٔ سرور شما حسابتان را رسمی علامت زده است. دیگران این نشان را کنار نام شما می‌بینند."
+      },
+      "notices": {
+        "title": "اطلاعیه‌های سرور",
+        "menuHint": "اعلان‌های گردانندهٔ سرور شما",
+        "header": "اطلاعیه‌هایی از گردانندهٔ {{server}}، سروری که حساب شما روی آن است. گرداننده آن‌ها را امضا می‌کند و برنامه بررسی‌شان می‌کند. پیام گفتگو نیستند: کسی نمی‌تواند به آن‌ها پاسخ دهد.",
+        "empty": "اطلاعیه‌ای نیست. اعلان‌های گردانندهٔ سرور شما، مثل تعمیرات یا به‌روزرسانی اجباری، اینجا نمایش داده می‌شوند.",
+        "new": "جدید",
+        "delete": "حذف اطلاعیه",
+        "deleted": "اطلاعیه حذف شد",
+        "notificationTitle": "{{server}} · اطلاعیه",
+        "notificationHidden": "اطلاعیهٔ تازه از سرور شما"
       }
     },
     "errors": {
@@ -1949,6 +2187,23 @@
         "row": "बैटरी ऑप्टिमाइज़ेशन",
         "exempt": "{{appName}} बैकग्राउंड में चल सकता है: कॉल और संदेश नहीं कटते",
         "limited": "प्रतिबंधित: स्क्रीन लॉक होने पर कॉल कट सकती हैं। अनुमति देने के लिए टैप करें।"
+      },
+      "official": {
+        "label": "आधिकारिक खाता · {{label}}",
+        "hint": "आपके सर्वर के संचालक द्वारा पुष्ट और हस्ताक्षरित। कोई भी अपने नाम में “सपोर्ट” या “एडमिन” लिख सकता है; यह निशान केवल उन खातों पर होता है जिनकी ज़िम्मेदारी संचालक लेता है।",
+        "request": "यह अनुरोध एक आधिकारिक खाते से है: {{label}}",
+        "ownHint": "आपके सर्वर के संचालक ने आपके खाते को आधिकारिक चिह्नित किया है। दूसरे लोग यह निशान आपके नाम के पास देखते हैं।"
+      },
+      "notices": {
+        "title": "सर्वर सूचनाएँ",
+        "menuHint": "आपके सर्वर के संचालक की घोषणाएँ",
+        "header": "{{server}} के संचालक की सूचनाएँ, वह सर्वर जिस पर आपका खाता है। इन पर संचालक के हस्ताक्षर होते हैं और ऐप इनकी जाँच करता है। ये चैट संदेश नहीं हैं: इनका कोई जवाब नहीं दे सकता।",
+        "empty": "कोई सूचना नहीं। आपके सर्वर के संचालक की घोषणाएँ, जैसे रखरखाव या ज़रूरी अपडेट, यहाँ दिखती हैं।",
+        "new": "नई",
+        "delete": "सूचना हटाएँ",
+        "deleted": "सूचना हटाई गई",
+        "notificationTitle": "{{server}} · सूचना",
+        "notificationHidden": "आपके सर्वर से नई सूचना"
       }
     },
     "errors": {
@@ -2079,6 +2334,23 @@
         "row": "Pengoptimalan baterai",
         "exempt": "{{appName}} dapat berjalan di latar belakang: panggilan dan pesan tidak terputus",
         "limited": "Dibatasi: panggilan dapat terputus saat layar terkunci. Ketuk untuk mengizinkan."
+      },
+      "official": {
+        "label": "Akun resmi · {{label}}",
+        "hint": "Dikonfirmasi dan ditandatangani oleh operator server Anda. Siapa pun bisa menulis “dukungan” atau “admin” di namanya; hanya akun yang dijamin operator yang memiliki tanda ini.",
+        "request": "Permintaan ini dari akun resmi: {{label}}",
+        "ownHint": "Operator server Anda menandai akun Anda sebagai resmi. Orang lain melihat tanda ini di samping nama Anda."
+      },
+      "notices": {
+        "title": "Pemberitahuan server",
+        "menuHint": "Pengumuman dari operator server Anda",
+        "header": "Pemberitahuan dari operator {{server}}, server tempat akun Anda berada. Ditandatangani oleh operator dan diperiksa oleh aplikasi. Ini bukan pesan obrolan: tidak ada yang bisa membalasnya.",
+        "empty": "Tidak ada pemberitahuan. Pengumuman dari operator server Anda, seperti pemeliharaan atau pembaruan wajib, muncul di sini.",
+        "new": "Baru",
+        "delete": "Hapus pemberitahuan",
+        "deleted": "Pemberitahuan dihapus",
+        "notificationTitle": "{{server}} · Pemberitahuan",
+        "notificationHidden": "Pemberitahuan baru dari server Anda"
       }
     },
     "errors": {
@@ -2208,6 +2480,23 @@
         "row": "Tối ưu hóa pin",
         "exempt": "{{appName}} được phép chạy nền: cuộc gọi và tin nhắn không bị ngắt",
         "limited": "Bị hạn chế: cuộc gọi có thể bị ngắt khi màn hình khóa. Chạm để cho phép."
+      },
+      "official": {
+        "label": "Tài khoản chính thức · {{label}}",
+        "hint": "Được nhà vận hành máy chủ của bạn xác nhận và ký. Ai cũng có thể đặt “hỗ trợ” hay “admin” trong tên; chỉ những tài khoản được nhà vận hành bảo đảm mới có dấu này.",
+        "request": "Yêu cầu này đến từ một tài khoản chính thức: {{label}}",
+        "ownHint": "Nhà vận hành máy chủ của bạn đã đánh dấu tài khoản của bạn là chính thức. Người khác thấy dấu này bên cạnh tên bạn."
+      },
+      "notices": {
+        "title": "Thông báo máy chủ",
+        "menuHint": "Thông báo từ nhà vận hành máy chủ của bạn",
+        "header": "Thông báo từ nhà vận hành {{server}}, máy chủ chứa tài khoản của bạn. Chúng được nhà vận hành ký và ứng dụng kiểm tra. Đây không phải tin nhắn trò chuyện: không ai có thể trả lời.",
+        "empty": "Không có thông báo. Các thông báo của nhà vận hành máy chủ, như bảo trì hay bản cập nhật bắt buộc, sẽ hiện ở đây.",
+        "new": "Mới",
+        "delete": "Xóa thông báo",
+        "deleted": "Đã xóa thông báo",
+        "notificationTitle": "{{server}} · Thông báo",
+        "notificationHidden": "Thông báo mới từ máy chủ của bạn"
       }
     },
     "errors": {
@@ -2337,6 +2626,23 @@
         "row": "电池优化",
         "exempt": "{{appName}} 可在后台运行：通话和消息不会中断",
         "limited": "受限：锁屏时通话可能中断。点按以允许。"
+      },
+      "official": {
+        "label": "官方账号 · {{label}}",
+        "hint": "由你所在服务器的运营方确认并签名。任何人都可以在名字里写“客服”或“管理员”；只有运营方担保的账号才有这个标记。",
+        "request": "此请求来自官方账号：{{label}}",
+        "ownHint": "你所在服务器的运营方已将你的账号标记为官方账号。其他人会在你的名字旁看到这个标记。"
+      },
+      "notices": {
+        "title": "服务器通知",
+        "menuHint": "来自服务器运营方的公告",
+        "header": "来自 {{server}}（你的账号所在服务器）运营方的通知。通知由运营方签名，并经应用验证。它们不是聊天消息：任何人都无法回复。",
+        "empty": "暂无通知。服务器运营方的公告（例如维护或必须更新）会显示在这里。",
+        "new": "新",
+        "delete": "删除通知",
+        "deleted": "通知已删除",
+        "notificationTitle": "{{server}} · 通知",
+        "notificationHidden": "来自服务器的新通知"
       }
     },
     "errors": {
@@ -2466,6 +2772,23 @@
         "row": "バッテリーの最適化",
         "exempt": "{{appName}} はバックグラウンドで動作できます。通話やメッセージが途切れません",
         "limited": "制限あり: 画面ロック時に通話が切れることがあります。タップして許可してください。"
+      },
+      "official": {
+        "label": "公式アカウント · {{label}}",
+        "hint": "ご利用のサーバーの運営者が確認し、署名しています。名前に「サポート」や「管理者」と書くことは誰にでもできますが、このマークが付くのは運営者が保証したアカウントだけです。",
+        "request": "このリクエストは公式アカウントからです：{{label}}",
+        "ownHint": "サーバーの運営者があなたのアカウントを公式としてマークしました。ほかの人にはあなたの名前の横にこのマークが表示されます。"
+      },
+      "notices": {
+        "title": "サーバーからのお知らせ",
+        "menuHint": "サーバー運営者からのお知らせ",
+        "header": "アカウントのあるサーバー {{server}} の運営者からのお知らせです。運営者が署名し、アプリが検証しています。チャットのメッセージではないため、返信はできません。",
+        "empty": "お知らせはありません。メンテナンスや必須アップデートなど、サーバー運営者からのお知らせがここに表示されます。",
+        "new": "新着",
+        "delete": "お知らせを削除",
+        "deleted": "お知らせを削除しました",
+        "notificationTitle": "{{server}} · お知らせ",
+        "notificationHidden": "サーバーから新しいお知らせがあります"
       }
     },
     "errors": {
@@ -2595,6 +2918,23 @@
         "row": "배터리 최적화",
         "exempt": "{{appName}} 앱이 백그라운드에서 실행될 수 있습니다. 통화와 메시지가 끊기지 않습니다",
         "limited": "제한됨: 화면이 잠기면 통화가 끊길 수 있습니다. 탭하여 허용하세요."
+      },
+      "official": {
+        "label": "공식 계정 · {{label}}",
+        "hint": "사용 중인 서버의 운영자가 확인하고 서명했습니다. 누구나 이름에 ‘지원’이나 ‘관리자’를 넣을 수 있지만, 이 표시는 운영자가 보증하는 계정에만 붙습니다.",
+        "request": "이 요청은 공식 계정에서 왔습니다: {{label}}",
+        "ownHint": "서버 운영자가 내 계정을 공식 계정으로 표시했습니다. 다른 사람에게는 내 이름 옆에 이 표시가 보입니다."
+      },
+      "notices": {
+        "title": "서버 공지",
+        "menuHint": "서버 운영자의 공지",
+        "header": "내 계정이 있는 서버 {{server}}의 운영자가 보낸 공지입니다. 운영자가 서명하고 앱이 확인합니다. 채팅 메시지가 아니므로 누구도 답장할 수 없습니다.",
+        "empty": "공지가 없습니다. 점검이나 필수 업데이트 같은 서버 운영자의 공지가 여기에 표시됩니다.",
+        "new": "새 공지",
+        "delete": "공지 삭제",
+        "deleted": "공지를 삭제했습니다",
+        "notificationTitle": "{{server}} · 공지",
+        "notificationHidden": "서버에서 새 공지가 왔습니다"
       }
     },
     "errors": {

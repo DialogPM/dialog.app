@@ -786,7 +786,8 @@ Rules
 
 `PUT /v1/account/username` (auth) — `{ "username": "ana.pop" }` or `{ "username": null }` to remove.
 3–32 characters `a-z 0-9 _ .`, starting with a letter, case-insensitive (stored lowercase),
-a leading `@` is ignored. `409 conflict` when taken, `400` when invalid.
+a leading `@` is ignored. `409 conflict` when taken (or kept free by the operator, see
+docs/ADMIN-API.md), `400` when invalid.
 
 `GET /v1/directory/username/{username}` (auth, rate limited like number lookups) → same shape
 as the number lookup. Every directory entry and `GET /v1/account` now include
@@ -982,3 +983,38 @@ Every device of each named account must be listed (409
 `{"missing", "extra"}`, 410 `{"stale"}`, as for `PUT /v1/groups/{id}/messages`); envelopes are type 7
 with `group_id` set to the client-side id (derived from the master key; the server cannot link
 it to the GroupIdentifier).
+
+## 21. Operator statements (official accounts, notices)
+
+The operator of a server can mark an account as official (a badge with a short label, e.g.
+"Dialog Support") and send notices to one account or to everyone. The server is not trusted
+to say either by itself: both are signed with an admin key (docs/ADMIN-API.md), whose private
+half exists only in the operator's admin app, and clients verify the signature.
+
+`GET /v1/info` → `"operator_keys": ["<base64 Ed25519 public key>", …]` (absent when the server
+has no admin API). A client pins the first non-empty set it sees and keeps it: a different set
+announced later is ignored. Statements signed by any other key are ignored.
+
+**Badge.** Directory entries (`GET /v1/directory/…`) and `GET /v1/profile/{account_id}` carry
+`"badge": {"label", "issued_at", "key", "signature"}` for an official account (absent
+otherwise). `signature` is Ed25519 over the UTF-8 string
+
+    dialog-operator-badge-v1\n<account id>\n<identity key, base64>\n<issued_at>\n<label>
+
+A client shows the badge only when `key` is pinned, the signature verifies, and the identity
+key in the string is the one it holds for that account (its pinned Signal identity when it
+has one). A badge therefore cannot be moved to another account and does not survive a
+replaced identity key. `label` is 1–40 characters on one line.
+
+**Notices.** `GET /v1/notices?after=<id>` (auth) →
+`{"notices":[{"id","target","title","body","created_at","key","signature"}], "more": bool}`,
+oldest first, at most 100 per request: the notices for this account and for everyone with an
+id above `after`. `target` is `*` or an account id; `signature` is Ed25519 over
+
+    dialog-operator-notice-v1\n<target>\n<created_at>\n<hex sha256 of title>\n<hex sha256 of body>
+
+A client shows a notice only when `key` is pinned, the signature verifies and `target` is `*`
+or its own account id. A new notice is announced to connected devices with the WebSocket
+event `{"kind":"operator_notice","id":n}`; there is no push notification. Notices are plain
+text (title ≤ 120 characters, body ≤ 2000).
+

@@ -48,6 +48,8 @@ const BATCH: usize = 200;
 const MANIFEST_PART: usize = 2000;
 /// How long a newly linked device waits for the manifest before it goes on without one.
 const FLOOR_WAIT_MS: i64 = 120_000;
+/// Pulls, 10 s apart, before a started engine settles for the slow rhythm.
+const SETTLING_PULLS: u32 = 6;
 /// A record the server returned older than known is uploaded again at most this often.
 const HEAL_EVERY_MS: i64 = 600_000;
 
@@ -967,6 +969,8 @@ impl Inner {
 
     pub(super) async fn vault_loop(self: Rc<Self>) {
         let mut pulled_once = false;
+        // Complete pulls since this engine started.
+        let mut pulls = 0u32;
         loop {
             if self.ws_out.borrow().is_some() {
                 if let Err(e) = self.vault_upgrade_v2() {
@@ -977,6 +981,7 @@ impl Inner {
                     Ok(ready) => {
                         pulled_once = ready;
                         if ready {
+                            pulls = pulls.saturating_add(1);
                             if let Err(e) = self.vault_flush().await {
                                 log::info!("vault flush: {e}");
                             }
@@ -988,7 +993,10 @@ impl Inner {
             let notify = self.vault_notify.clone();
             // A newly linked device still short of what was vouched for looks again soon.
             let incomplete = matches!(self.db.borrow().kv_get("vault_floor"), Ok(Some(_)));
-            let wait = if pulled_once && !incomplete { 300 } else { 10 };
+            // So does a device that just started: another device of ours may be uploading
+            // records at this very moment, and it tells only the devices it knows about (a
+            // device that signed in seconds ago is not one of them yet).
+            let wait = if pulled_once && !incomplete && pulls > SETTLING_PULLS { 300 } else { 10 };
             tokio::select! {
                 _ = notify.notified() => {
                     // Coalesce bursts of writes.

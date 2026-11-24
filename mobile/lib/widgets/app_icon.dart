@@ -114,6 +114,12 @@ const Map<String, List<String>> kIconPaths = {
   'book': ['M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z', 'M10 16h6', 'M13 11a2 2 0 1 0 0-4a2 2 0 0 0 0 4z', 'M4 8h3', 'M4 12h3', 'M4 16h3'],
   'wifioff': ['M3 3l18 18', 'M8.5 16.5a5 5 0 0 1 7 0', 'M5 12.9a10 10 0 0 1 5.2-2.8', 'M2 8.8a15 15 0 0 1 4.2-2.7', 'M13.8 10.2a10 10 0 0 1 5.2 2.7', 'M10.6 5.1A15 15 0 0 1 22 8.8', '*M12 20h0'],
   'fingerprint': ['M12 11v3', 'M8 11a4 4 0 0 1 8 0v2a8 8 0 0 1-1 4', 'M5 13v-2a7 7 0 0 1 14 0', 'M12 17v4', 'M8.5 15a8 8 0 0 0 .5 5'],
+  // Official account (widgets/official_badge.dart): a filled rosette with the check drawn over
+  // it in the contrasting color. Deliberately unlike 'shield' (safety number verified).
+  'seal': [
+    '#M5 7.2a2.2 2.2 0 0 1 2.2-2.2h1a2.2 2.2 0 0 0 1.55-.64l.7-.7a2.2 2.2 0 0 1 3.12 0l.7.7c.41.41.97.64 1.55.64h1a2.2 2.2 0 0 1 2.2 2.2v1c0 .58.23 1.14.64 1.55l.7.7a2.2 2.2 0 0 1 0 3.12l-.7.7a2.2 2.2 0 0 0-.64 1.55v1a2.2 2.2 0 0 1-2.2 2.2h-1a2.2 2.2 0 0 0-1.55.64l-.7.7a2.2 2.2 0 0 1-3.12 0l-.7-.7a2.2 2.2 0 0 0-1.55-.64h-1a2.2 2.2 0 0 1-2.2-2.2v-1a2.2 2.2 0 0 0-.64-1.55l-.7-.7a2.2 2.2 0 0 1 0-3.12l.7-.7a2.2 2.2 0 0 0 .64-1.55z',
+  ],
+  'sealcheck': ['M8.7 12.1l2.3 2.3 4.4-4.6'],
 };
 
 enum _Kind { stroke, dot, fill }

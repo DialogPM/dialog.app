@@ -13,6 +13,7 @@ import 'call_settings.dart';
 import 'default_timer.dart';
 import 'media_retention.dart';
 import 'dnd.dart';
+import 'notices.dart';
 import 'store.dart';
 import '../services/remote_wipe.dart';
 
@@ -91,6 +92,7 @@ Future<void> loadSession() async {
   unawaited(loadDnd());
   unawaited(loadCallSettings());
   unawaited(loadDefaultTimer());
+  unawaited(loadNotices());
   startMediaChecks();
   onSessionStarted?.call();
 }
@@ -113,6 +115,7 @@ void signedOut(String? reason) {
   final defaultServer = appData.appState?.defaultServerUrl ?? kDefaultServer;
   store.resetSession();
   applyDnd(0);
+  resetNotices();
   store.set((d) => d.copyWith(
         loggedOutReason: reason,
         locked: false,

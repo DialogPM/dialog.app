@@ -33,6 +33,7 @@ import '../../theme/tokens.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/official_badge.dart';
 import '../../widgets/ui.dart';
 import '../chats/contact_picker.dart';
 import '../chats/new_group_page.dart';
@@ -228,6 +229,8 @@ class _ProfileSectionState extends ConsumerState<_ProfileSection> {
           ),
         ),
       ),
+      if (hasOfficialLabel(profile?.official))
+        Center(child: OfficialLine(profile!.official, hint: context.t('mobile.official.ownHint'), center: true)),
       AppField(
         controller: _name,
         focusNode: _nameFocus,

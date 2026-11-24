@@ -32,6 +32,7 @@ pub(crate) mod local_lock;
 mod marks;
 mod messages;
 mod net;
+pub mod operator;
 mod receive;
 mod requests;
 pub mod retention;
@@ -432,6 +433,9 @@ impl Inner {
             }
             if let Err(e) = me.sealed_setup().await {
                 log::warn!("sealed sender setup: {e}");
+            }
+            if let Err(e) = me.operator_setup().await {
+                log::warn!("operator keys setup: {e}");
             }
         }));
         *self.background.borrow_mut() = tasks;
