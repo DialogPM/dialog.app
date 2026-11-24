@@ -30,6 +30,17 @@ async fn derive_password(password: String, kdf: KdfParams) -> Result<crypto::Pas
         .ctx("password derivation task")?
 }
 
+/// The account secret behind the 24 words and the seed passphrase (Argon2id: off the UI thread).
+async fn derive_seed_secret(entropy: AccountSecret, passphrase: String) -> Result<AccountSecret> {
+    if passphrase.is_empty() {
+        return Ok(entropy);
+    }
+    let passphrase = zeroize::Zeroizing::new(passphrase);
+    tokio::task::spawn_blocking(move || crypto::apply_seed_passphrase(&entropy, &passphrase))
+        .await
+        .ctx("seed passphrase derivation task")?
+}
+
 /// New passwords must meet the password rules (see util::password_problems).
 fn validate_password(password: &str) -> Result<()> {
     let problems = crate::util::password_problems(password);
@@ -63,6 +74,7 @@ impl Inner {
             account,
             default_server_url: self.default_server_url.clone(),
             pending_mnemonic: self.db.borrow().kv_get_json("pending_mnemonic").ok().flatten(),
+            seed_passphrase: matches!(self.seed_entropy(), Ok(Some(_))),
             local_protected: self.local_protected(),
             auto_unlock: self.auto_unlock_enabled(),
         }
@@ -106,16 +118,32 @@ impl Inner {
         password: &str,
         device_name: &str,
     ) -> Result<RegisterResult> {
+        self.register_with_passphrase(server_url, password, device_name, "").await
+    }
+
+    /// Creates an account. A non-empty `seed_passphrase` (the "25th word") becomes part of
+    /// the key derivation: the account can then be recovered only with the 24 words *and*
+    /// the passphrase, which is stored nowhere.
+    pub async fn register_with_passphrase(
+        self: &Rc<Self>,
+        server_url: &str,
+        password: &str,
+        device_name: &str,
+        seed_passphrase: &str,
+    ) -> Result<RegisterResult> {
         self.ensure_logged_out()?;
         validate_password(password)?;
+        crypto::check_seed_passphrase(seed_passphrase)?;
         let url = normalize_server_url(server_url).ok_or_else(|| CoreError::invalid("invalid server URL"))?;
         let api = ApiClient::new(&url, None);
-        let (words, secret) = crypto::generate_mnemonic();
+        let (words, entropy) = crypto::generate_mnemonic();
+        let secret = derive_seed_secret(entropy.clone(), seed_passphrase.to_string()).await?;
+        let seed = (!seed_passphrase.is_empty()).then_some(&entropy);
         let keys = AccountKeys::derive(&secret)?;
         let kdf = KdfParams::new_random();
         let pw = derive_password(password.to_string(), kdf.clone()).await?;
         let registration_id = new_registration_id();
-        let wrapped = crypto::wrap_account_secret(&pw.wrap_key, &secret)?;
+        let wrapped = crypto::wrap_account_secret(&pw.wrap_key, &secret, seed)?;
         let pow = self.registration_pow(&api).await?;
         let req = RegisterReq {
             kdf: kdf.clone(),
@@ -135,11 +163,12 @@ impl Inner {
         };
         self.remember_device_name(device_name);
         self.finish_login(account.clone(), resp.token, &secret, registration_id, &kdf, &wrapped, false).await?;
+        self.remember_seed(seed)?;
         self.lock_after_login(password).await;
         // Kept (in the encrypted local database) so it can be shown again if the app is
         // closed before the user confirmed writing it down.
         self.db.borrow().kv_set_json("pending_mnemonic", &words)?;
-        Ok(RegisterResult { account, mnemonic: words })
+        Ok(RegisterResult { account, mnemonic: words, seed_passphrase: seed.is_some() })
     }
 
     pub async fn login(
@@ -213,7 +242,7 @@ impl Inner {
         device_name: &str,
     ) -> Result<AccountInfo> {
         let wrapped = unb64(&resp.wrapped_account_key)?;
-        let secret = crypto::unwrap_account_secret(wrap_key, &wrapped)?;
+        let (secret, seed) = crypto::unwrap_account_key(wrap_key, &wrapped)?;
         let keys = AccountKeys::derive(&secret)?;
         if let Some(ik) = &resp.identity_key {
             if unb64(ik)? != keys.identity.identity_key().serialize().to_vec() {
@@ -228,6 +257,7 @@ impl Inner {
         };
         self.remember_device_name(device_name);
         self.finish_login(account.clone(), resp.token, &secret, registration_id, kdf, &wrapped, true).await?;
+        self.remember_seed(seed.as_ref())?;
         self.lock_after_login(password).await;
         Ok(account)
     }
@@ -240,11 +270,27 @@ impl Inner {
         new_password: &str,
         device_name: &str,
     ) -> Result<AccountInfo> {
+        self.recover_with_passphrase(server_url, number, mnemonic, "", new_password, device_name).await
+    }
+
+    /// Recovers an account from its 24 words and, if it was created with one, its seed
+    /// passphrase. A wrong passphrase derives other keys, which the server does not know.
+    pub async fn recover_with_passphrase(
+        self: &Rc<Self>,
+        server_url: &str,
+        number: &str,
+        mnemonic: &[String],
+        seed_passphrase: &str,
+        new_password: &str,
+        device_name: &str,
+    ) -> Result<AccountInfo> {
         self.ensure_logged_out()?;
         validate_password(new_password)?;
         let url = normalize_server_url(server_url).ok_or_else(|| CoreError::invalid("invalid server URL"))?;
         let number = normalize_number(number).ok_or_else(|| CoreError::invalid("invalid account number"))?;
-        let secret = crypto::parse_mnemonic(mnemonic)?;
+        let entropy = crypto::parse_mnemonic(mnemonic)?;
+        let secret = derive_seed_secret(entropy.clone(), seed_passphrase.to_string()).await?;
+        let seed = (!seed_passphrase.is_empty()).then_some(&entropy);
         let keys = AccountKeys::derive(&secret)?;
         let api = ApiClient::new(&url, None);
         #[derive(Deserialize)]
@@ -256,7 +302,7 @@ impl Inner {
         let kdf = KdfParams::new_random();
         let pw = derive_password(new_password.to_string(), kdf.clone()).await?;
         let registration_id = new_registration_id();
-        let wrapped = crypto::wrap_account_secret(&pw.wrap_key, &secret)?;
+        let wrapped = crypto::wrap_account_secret(&pw.wrap_key, &secret, seed)?;
         let req = RecoverReq {
             number,
             challenge: ch.challenge.clone(),
@@ -281,6 +327,7 @@ impl Inner {
         };
         self.remember_device_name(device_name);
         self.finish_login(account.clone(), resp.token, &secret, registration_id, &kdf, &wrapped, true).await?;
+        self.remember_seed(seed)?;
         self.lock_after_login(new_password).await;
         Ok(account)
     }
@@ -372,7 +419,8 @@ impl Inner {
         let kdf = KdfParams::new_random();
         let new_keys = derive_password(new.to_string(), kdf.clone()).await?;
         let secret = self.account_secret()?;
-        let new_wrapped = crypto::wrap_account_secret(&new_keys.wrap_key, &secret)?;
+        let seed = self.seed_entropy()?;
+        let new_wrapped = crypto::wrap_account_secret(&new_keys.wrap_key, &secret, seed.as_ref())?;
         let r: Result<serde_json::Value> = s
             .api
             .put(
@@ -411,11 +459,33 @@ impl Inner {
             .kv_get("wrapped_account_key")?
             .ok_or_else(|| CoreError::new(ErrorCode::InvalidInput, "log in again on this device to view the recovery phrase"))?;
         let keys = derive_password(password.to_string(), self.stored_kdf()?).await?;
-        let secret = crypto::unwrap_account_secret(&keys.wrap_key, &wrapped)?;
+        let (secret, seed) = crypto::unwrap_account_key(&keys.wrap_key, &wrapped)?;
         if !crypto::ct_eq(&secret.0, &self.account_secret()?.0) {
             return Err(CoreError::new(ErrorCode::InvalidPassword, "wrong password"));
         }
-        Ok(crypto::mnemonic_words(&secret))
+        // With a seed passphrase the words encode the entropy, not the account secret.
+        let seed = match seed {
+            Some(s) => Some(s),
+            None => self.seed_entropy()?,
+        };
+        Ok(crypto::mnemonic_words(seed.as_ref().unwrap_or(&secret)))
+    }
+
+    /// The entropy of the 24 words, kept only for accounts with a seed passphrase (for the
+    /// others it is the account secret itself).
+    pub(super) fn seed_entropy(&self) -> Result<Option<AccountSecret>> {
+        match self.db.borrow().kv_get("seed_entropy")? {
+            Some(v) => Ok(Some(AccountSecret(crypto::key32(&v)?))),
+            None => Ok(None),
+        }
+    }
+
+    pub(super) fn remember_seed(&self, seed: Option<&AccountSecret>) -> Result<()> {
+        let db = self.db.borrow();
+        match seed {
+            Some(s) => db.kv_set("seed_entropy", &s.0),
+            None => db.kv_delete("seed_entropy"),
+        }
     }
 
     pub async fn delete_account(&self, password: &str) -> Result<()> {

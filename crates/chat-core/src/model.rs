@@ -40,6 +40,9 @@ pub struct AppState {
     pub default_server_url: String,
     /// Recovery phrase of a just-created account that the user has not confirmed yet.
     pub pending_mnemonic: Option<Vec<String>>,
+    /// The account was created with a seed passphrase: recovering it takes the 24 words and
+    /// the passphrase.
+    pub seed_passphrase: bool,
     /// The local database is locked with the account password (always true once set up;
     /// false right after linking a device or for data from older versions).
     pub local_protected: bool,
@@ -52,6 +55,8 @@ pub struct AppState {
 pub struct RegisterResult {
     pub account: AccountInfo,
     pub mnemonic: Vec<String>,
+    /// A seed passphrase was set: the words alone do not recover the account.
+    pub seed_passphrase: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

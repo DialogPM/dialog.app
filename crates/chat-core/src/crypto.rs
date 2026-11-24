@@ -4,13 +4,18 @@
 //!
 //! ```text
 //! BIP39 mnemonic (24 words) ── entropy = account_secret (32 bytes)
+//!     (with a seed passphrase, the optional "25th word":
+//!      account_secret = Argon2id(passphrase, salt = HKDF(entropy)), so the 24 words alone
+//!      lead to a different, unrelated set of keys)
 //!     ├─ HKDF "identity"  → Signal identity key pair (never changes for an account)
 //!     ├─ HKDF "recovery"  → Ed25519 key pair proving seed ownership to the server
 //!     ├─ HKDF "vault"     → AES-256-GCM key for the encrypted server vault
 //!     └─ HKDF "profile"   → profile key shared with contacts (encrypts name/about/avatar)
 //!
 //! password ── Argon2id(salt, m, t, p) → 64 bytes = auth_key (to server) || wrap_key (local only)
-//!     wrapped_account_key = AES-256-GCM(wrap_key, account_secret)
+//!     wrapped_account_key = AES-256-GCM(wrap_key, account_secret [|| entropy])
+//!     (the entropy is appended only for accounts with a seed passphrase, so the 24 words
+//!      can be shown again; without a passphrase the secret is the entropy)
 //! ```
 
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
@@ -173,7 +178,55 @@ pub fn parse_mnemonic(words: &[String]) -> Result<AccountSecret> {
     Ok(AccountSecret(out))
 }
 
-/// The 32-byte root secret of an account (the mnemonic entropy).
+/// Longest seed passphrase accepted, in bytes after normalisation.
+pub const MAX_SEED_PASSPHRASE: usize = 256;
+
+/// Unicode NFKD, as BIP39 does for its passphrase: the same text typed on another keyboard
+/// or system must give the same bytes. Nothing is trimmed: spaces are part of the passphrase.
+fn normalize_passphrase(passphrase: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    passphrase.nfkd().collect()
+}
+
+/// Checks a seed passphrase chosen at registration.
+pub fn check_seed_passphrase(passphrase: &str) -> Result<()> {
+    let n = normalize_passphrase(passphrase);
+    if n.len() > MAX_SEED_PASSPHRASE {
+        return Err(CoreError::invalid("the seed passphrase is too long"));
+    }
+    if n != n.trim() {
+        // Invisible on paper and on screen: the account could not be recovered from notes.
+        return Err(CoreError::invalid("the seed passphrase cannot start or end with a space"));
+    }
+    Ok(())
+}
+
+/// The account secret behind 24 words and a seed passphrase (the "25th word").
+///
+/// An empty passphrase leaves the secret equal to the entropy (accounts without one). Any
+/// other passphrase is part of the derivation itself: every passphrase gives a valid but
+/// different secret, and nothing stored anywhere says which one is right. Argon2id (64 MiB,
+/// 3 passes, salted with the entropy) makes guessing it slow even for someone holding the
+/// 24 words. Slow (~0.5 s): call it off the UI thread.
+pub fn apply_seed_passphrase(entropy: &AccountSecret, passphrase: &str) -> Result<AccountSecret> {
+    if passphrase.is_empty() {
+        return Ok(entropy.clone());
+    }
+    let mut input = b"chatapp/seed-passphrase\0".to_vec();
+    input.extend_from_slice(normalize_passphrase(passphrase).as_bytes());
+    let salt = hkdf32(&entropy.0, "chatapp/seed-passphrase-salt");
+    let params = argon2::Params::new(MIN_KDF_M, MIN_KDF_T, 1, Some(32))
+        .map_err(|e| CoreError::internal(format!("argon2 params: {e}")))?;
+    let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut out = [0u8; 32];
+    let r = argon.hash_password_into(&input, &salt, &mut out);
+    input.zeroize();
+    r.map_err(|e| CoreError::internal(format!("argon2: {e}")))?;
+    Ok(AccountSecret(out))
+}
+
+/// The 32-byte root secret of an account (the mnemonic entropy, or what the entropy and the
+/// seed passphrase derive).
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct AccountSecret(pub [u8; 32]);
 
@@ -312,19 +365,39 @@ pub fn derive_local_db_key(password: &str, kdf: &KdfParams) -> Result<[u8; 32]> 
     Ok(out)
 }
 
-pub fn wrap_account_secret(wrap_key: &[u8; 32], secret: &AccountSecret) -> Result<Vec<u8>> {
-    aead_seal(wrap_key, &secret.0, WRAP_AAD)
+/// Wraps the account secret under the password. `entropy` is given for accounts with a seed
+/// passphrase (where it differs from the secret) so the 24 words can be shown again.
+pub fn wrap_account_secret(wrap_key: &[u8; 32], secret: &AccountSecret, entropy: Option<&AccountSecret>) -> Result<Vec<u8>> {
+    let mut plain = secret.0.to_vec();
+    if let Some(e) = entropy {
+        plain.extend_from_slice(&e.0);
+    }
+    let sealed = aead_seal(wrap_key, &plain, WRAP_AAD);
+    plain.zeroize();
+    sealed
+}
+
+/// The account secret and, for accounts with a seed passphrase, the entropy of the 24 words.
+pub fn unwrap_account_key(wrap_key: &[u8; 32], wrapped: &[u8]) -> Result<(AccountSecret, Option<AccountSecret>)> {
+    let mut plain = aead_open(wrap_key, wrapped, WRAP_AAD)
+        .map_err(|_| CoreError::new(ErrorCode::InvalidPassword, "cannot decrypt account key"))?;
+    if plain.len() != 32 && plain.len() != 64 {
+        plain.zeroize();
+        return Err(CoreError::internal("wrapped account key has wrong length"));
+    }
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&plain[..32]);
+    let entropy = (plain.len() == 64).then(|| {
+        let mut e = [0u8; 32];
+        e.copy_from_slice(&plain[32..]);
+        AccountSecret(e)
+    });
+    plain.zeroize();
+    Ok((AccountSecret(secret), entropy))
 }
 
 pub fn unwrap_account_secret(wrap_key: &[u8; 32], wrapped: &[u8]) -> Result<AccountSecret> {
-    let plain = aead_open(wrap_key, wrapped, WRAP_AAD)
-        .map_err(|_| CoreError::new(ErrorCode::InvalidPassword, "cannot decrypt account key"))?;
-    if plain.len() != 32 {
-        return Err(CoreError::internal("wrapped account key has wrong length"));
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&plain);
-    Ok(AccountSecret(out))
+    Ok(unwrap_account_key(wrap_key, wrapped)?.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +559,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn seed_passphrase_is_part_of_the_derivation() {
+        let (_, entropy) = generate_mnemonic();
+        // No passphrase: the secret is the entropy, as for every account created before.
+        assert_eq!(apply_seed_passphrase(&entropy, "").unwrap().0, entropy.0);
+        let a = apply_seed_passphrase(&entropy, "trezor").unwrap();
+        // Deterministic, and every passphrase gives its own valid secret.
+        assert_eq!(a.0, apply_seed_passphrase(&entropy, "trezor").unwrap().0);
+        assert_ne!(a.0, entropy.0);
+        assert_ne!(a.0, apply_seed_passphrase(&entropy, "Trezor").unwrap().0);
+        assert_ne!(a.0, apply_seed_passphrase(&entropy, "trezor ").unwrap().0);
+        // Other words, same passphrase: unrelated secret.
+        let (_, other) = generate_mnemonic();
+        assert_ne!(a.0, apply_seed_passphrase(&other, "trezor").unwrap().0);
+        // The same text in another Unicode form (precomposed or combining) is the same passphrase.
+        assert_eq!(
+            apply_seed_passphrase(&entropy, "caf\u{e9}").unwrap().0,
+            apply_seed_passphrase(&entropy, "cafe\u{301}").unwrap().0
+        );
+        // Whole key set differs from the one of the words alone.
+        let plain = AccountKeys::derive(&entropy).unwrap();
+        let with = AccountKeys::derive(&a).unwrap();
+        assert_ne!(plain.identity.identity_key(), with.identity.identity_key());
+        assert_ne!(plain.recovery_public_key(), with.recovery_public_key());
+        assert_ne!(plain.vault_key, with.vault_key);
+
+        assert!(check_seed_passphrase("").is_ok());
+        assert!(check_seed_passphrase("two words").is_ok());
+        assert!(check_seed_passphrase(" leading").is_err());
+        assert!(check_seed_passphrase("trailing ").is_err());
+        assert!(check_seed_passphrase(&"x".repeat(MAX_SEED_PASSPHRASE + 1)).is_err());
+    }
+
+    #[test]
+    fn wrapped_key_carries_the_entropy_only_with_a_passphrase() {
+        let key = [7u8; 32];
+        let (_, entropy) = generate_mnemonic();
+        let plain = wrap_account_secret(&key, &entropy, None).unwrap();
+        let (s, e) = unwrap_account_key(&key, &plain).unwrap();
+        assert_eq!(s.0, entropy.0);
+        assert!(e.is_none());
+        let secret = AccountSecret([9u8; 32]);
+        let wrapped = wrap_account_secret(&key, &secret, Some(&entropy)).unwrap();
+        let (s, e) = unwrap_account_key(&key, &wrapped).unwrap();
+        assert_eq!(s.0, secret.0);
+        assert_eq!(e.unwrap().0, entropy.0);
+        assert_eq!(unwrap_account_secret(&key, &wrapped).unwrap().0, secret.0);
+    }
+
+    #[test]
     fn mnemonic_roundtrip_and_deterministic_keys() {
         let (words, secret) = generate_mnemonic();
         assert_eq!(words.len(), 24);
@@ -528,7 +650,7 @@ mod tests {
         assert!(derive_password_keys("x", &KdfParams { m: 8192, t: 1, ..KdfParams::new_random() }).is_err());
         assert!(derive_password_keys("x", &KdfParams { t: 2, ..KdfParams::new_random() }).is_err());
         let keys = derive_password_keys("correct horse", &kdf).unwrap();
-        let wrapped = wrap_account_secret(&keys.wrap_key, &secret).unwrap();
+        let wrapped = wrap_account_secret(&keys.wrap_key, &secret, None).unwrap();
         let back = unwrap_account_secret(&keys.wrap_key, &wrapped).unwrap();
         assert_eq!(back.0, secret.0);
         let wrong = derive_password_keys("wrong", &kdf).unwrap();

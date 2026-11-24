@@ -65,13 +65,21 @@ contact and refuse a change.
 ### Key derivation (client side, informative)
 
 * Recovery seed: BIP39 24-word mnemonic (256-bit entropy = `account_secret`).
+* Optional **seed passphrase** (the "25th word"), chosen when the account is created:
+  `account_secret = Argon2id("chatapp/seed-passphrase\0" || NFKD(passphrase),
+  salt = HKDF(entropy, "chatapp/seed-passphrase-salt"), m = 64 MiB, t = 3, p = 1)`.
+  It is part of the derivation, not a lock on the words: every passphrase gives a valid,
+  different account secret, and the passphrase is stored nowhere. Recovery needs the
+  24 words and the passphrase. (The server can see *that* an account uses one, from the
+  size of `wrapped_account_key` below; it learns nothing about the passphrase.)
 * From `account_secret` the client derives (HKDF-SHA256): the Signal identity key pair
   (so the identity never changes for an account), an Ed25519 **recovery key pair** and a
   symmetric **vault key**.
 * Password: `Argon2id(password, salt, m, t, p) -> 64 bytes`, split into
   `auth_key` (first 32 bytes, sent to server) and `wrap_key` (last 32 bytes, never sent).
   `wrapped_account_key = AES-256-GCM(wrap_key, account_secret)` is stored on the server
-  as an opaque blob.
+  as an opaque blob. For an account with a seed passphrase the plaintext is
+  `account_secret || entropy` (64 bytes), so its devices can show the 24 words again.
 * The server stores `sha256(auth_key)` and compares in constant time.
 
 `kdf` object (opaque to the server except for storage):

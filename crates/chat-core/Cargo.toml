@@ -23,6 +23,7 @@ thiserror = "2"
 log = "0.4"
 rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"] }
 bip39 = "2"
+unicode-normalization = "0.1"
 hkdf = "0.12"
 sha2 = "0.10"
 hmac = "0.12"

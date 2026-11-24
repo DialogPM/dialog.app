@@ -185,7 +185,7 @@ class _RootState extends ConsumerState<_Root> {
     final pending = appState.pendingMnemonic;
     if (appState.account != null && pending != null && pending.isNotEmpty) {
       // Account created but the recovery phrase was never confirmed: show it again.
-      return Onboarding(defaultServer: appState.defaultServerUrl, resumeAccount: appState.account, resumeMnemonic: pending);
+      return Onboarding(defaultServer: appState.defaultServerUrl, resumeAccount: appState.account, resumeMnemonic: pending, resumeSeedPassphrase: appState.seedPassphrase);
     }
     // Linked device or data from an older version: lock it with the password first.
     if (!appState.localProtected) return const DataLockScreen(protect: true);

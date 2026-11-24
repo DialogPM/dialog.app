@@ -92,6 +92,10 @@ struct LinkPayload {
     /// to take the server's word for it. Absent from devices of older versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     vault_floor: Option<super::vault::VaultFloor>,
+    /// Entropy of the 24 words, for accounts with a seed passphrase (where the account
+    /// secret is not the entropy), so the new device can show the words too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seed_entropy: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -255,6 +259,10 @@ impl Inner {
             .map_err(|_| CoreError::internal("could not decrypt the account data"))?;
         let data: LinkPayload = serde_json::from_slice(&plain)?;
         let secret = AccountSecret(crypto::key32(&unb64(&data.account_secret)?)?);
+        let seed = match &data.seed_entropy {
+            Some(e) => Some(AccountSecret(crypto::key32(&unb64(e)?)?)),
+            None => None,
+        };
         let keys = AccountKeys::derive(&secret)?;
         *self.link_floor.borrow_mut() = data.vault_floor.clone();
         let registration_id = rand::rng().random_range(1..16380);
@@ -283,6 +291,7 @@ impl Inner {
         let wrapped = unb64(&resp.wrapped_account_key)?;
         self.remember_device_name(&l.device_name);
         self.finish_login(account.clone(), resp.token, &secret, registration_id, &resp.kdf, &wrapped, true).await?;
+        self.remember_seed(seed.as_ref())?;
         Ok(account)
     }
 
@@ -380,6 +389,7 @@ impl Inner {
             number: s.account.number.clone(),
             server_url: s.account.server_url.clone(),
             vault_floor: self.vault_write_manifest().await,
+            seed_entropy: self.seed_entropy()?.map(|e| b64(e.0)),
         };
         let sealed = crypto::aead_seal(&link_key(&secret), &serde_json::to_vec(&payload)?, LINK_AAD)?;
         let _: serde_json::Value = s

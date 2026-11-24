@@ -470,6 +470,10 @@ Future<void> _revealMnemonic(BuildContext context) async {
           Text(ctx.t('settings.account.recoveryShown'), style: ts(13.5, color: t.muted, height: 1.45)),
           const SizedBox(height: 16),
           SeedGrid(words: words!),
+          if (appData.appState?.seedPassphrase == true) ...[
+            const SizedBox(height: 16),
+            NoticeBox(tone: 'warn', icon: 'alert', text: ctx.t('onboarding.seedPass.notShown')),
+          ],
           const SizedBox(height: 16),
           NoticeBox(tone: 'warn', icon: 'alert', text: ctx.t('onboarding.seed.warning')),
           const SizedBox(height: 16),

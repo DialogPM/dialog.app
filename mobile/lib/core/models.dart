@@ -87,13 +87,16 @@ class AppState {
   /// Recovery phrase of a just-created account not yet confirmed by the user.
   final List<String>? pendingMnemonic;
 
+  /// The account has a seed passphrase ("25th word"): recovery needs it besides the words.
+  final bool seedPassphrase;
+
   /// The local database is locked with the account password.
   final bool localProtected;
 
   /// "Remember the password on this phone" is on: the data opens at startup without it.
   final bool autoUnlock;
 
-  const AppState({required this.status, this.account, required this.defaultServerUrl, this.pendingMnemonic, this.localProtected = false, this.autoUnlock = false});
+  const AppState({required this.status, this.account, required this.defaultServerUrl, this.pendingMnemonic, this.seedPassphrase = false, this.localProtected = false, this.autoUnlock = false});
 
   bool get ready => status == 'ready';
 
@@ -102,6 +105,7 @@ class AppState {
         account: _map(j['account']) == null ? null : AccountInfo.fromJson(_map(j['account'])!),
         defaultServerUrl: _str(j['default_server_url']) ?? '',
         pendingMnemonic: j['pending_mnemonic'] is List ? _strings(j['pending_mnemonic']) : null,
+        seedPassphrase: _bool(j['seed_passphrase']),
         localProtected: _bool(j['local_protected']),
         autoUnlock: _bool(j['auto_unlock']),
       );
@@ -113,10 +117,16 @@ class RegisterResult {
   /// 24 BIP39 words. Shown to the user exactly once.
   final List<String> mnemonic;
 
-  const RegisterResult({required this.account, required this.mnemonic});
+  /// A seed passphrase was set; it is not part of the words shown.
+  final bool seedPassphrase;
 
-  factory RegisterResult.fromJson(Json j) =>
-      RegisterResult(account: AccountInfo.fromJson(_map(j['account']) ?? {}), mnemonic: _strings(j['mnemonic']));
+  const RegisterResult({required this.account, required this.mnemonic, this.seedPassphrase = false});
+
+  factory RegisterResult.fromJson(Json j) => RegisterResult(
+        account: AccountInfo.fromJson(_map(j['account']) ?? {}),
+        mnemonic: _strings(j['mnemonic']),
+        seedPassphrase: _bool(j['seed_passphrase']),
+      );
 }
 
 /// "connecting" | "online" | "offline"

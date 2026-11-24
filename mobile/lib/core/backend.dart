@@ -388,8 +388,13 @@ class Backend {
   // --- app / onboarding -------------------------------------------------------
   Future<AppState> getState() async => AppState.fromJson(await _obj('get_state'));
   Future<ServerInfo> checkServer(String url) async => ServerInfo.fromJson(await _obj('check_server', {'url': url}));
-  Future<RegisterResult> register({required String serverUrl, required String password, required String deviceName}) async =>
-      RegisterResult.fromJson(await _obj('register', {'server_url': serverUrl, 'password': password, 'device_name': deviceName}));
+  Future<RegisterResult> register({required String serverUrl, required String password, required String deviceName, String? seedPassphrase}) async =>
+      RegisterResult.fromJson(await _obj('register', {
+        'server_url': serverUrl,
+        'password': password,
+        'device_name': deviceName,
+        'seed_passphrase': ?seedPassphrase,
+      }));
   Future<AccountInfo> login({
     required String serverUrl,
     required String number,
@@ -410,6 +415,7 @@ class Backend {
     required List<String> mnemonic,
     required String newPassword,
     required String deviceName,
+    String? seedPassphrase,
   }) async =>
       AccountInfo.fromJson(await _obj('recover', {
         'server_url': serverUrl,
@@ -417,6 +423,7 @@ class Backend {
         'mnemonic': mnemonic,
         'new_password': newPassword,
         'device_name': deviceName,
+        'seed_passphrase': ?seedPassphrase,
       }));
 
   // --- calls ------------------------------------------------------------------

@@ -26,7 +26,10 @@ import '../../services/remote_wipe.dart';
 enum _Step { welcome, register, login, recover, other }
 
 class Onboarding extends ConsumerStatefulWidget {
-  const Onboarding({super.key, required this.defaultServer, this.resumeAccount, this.resumeMnemonic});
+  const Onboarding({super.key, required this.defaultServer, this.resumeAccount, this.resumeMnemonic, this.resumeSeedPassphrase = false});
+
+  /// The resumed account has a seed passphrase (it is not among the words shown).
+  final bool resumeSeedPassphrase;
 
   final String defaultServer;
 
@@ -107,6 +110,7 @@ class _OnboardingState extends ConsumerState<Onboarding> {
           onBack: _back,
           resumeAccount: widget.resumeAccount,
           resumeMnemonic: widget.resumeMnemonic,
+          resumeSeedPassphrase: widget.resumeSeedPassphrase,
           onStage: (s) => setState(() => _regStage = s),
         );
       case _Step.login:
@@ -541,7 +545,16 @@ class _WelcomeState extends State<_Welcome> {
 // ---------------------------------------------------------------------------
 
 class _RegisterFlow extends StatefulWidget {
-  const _RegisterFlow({required this.serverUrl, required this.onBack, this.resumeAccount, this.resumeMnemonic, required this.onStage});
+  const _RegisterFlow({
+    required this.serverUrl,
+    required this.onBack,
+    this.resumeAccount,
+    this.resumeMnemonic,
+    this.resumeSeedPassphrase = false,
+    required this.onStage,
+  });
+
+  final bool resumeSeedPassphrase;
 
   final String serverUrl;
   final VoidCallback onBack;
@@ -563,29 +576,48 @@ class _RegisterFlowState extends State<_RegisterFlow> {
   bool _savedIt = false;
   bool _copied = false;
 
+  // Optional seed passphrase (the "25th word"), under Advanced.
+  bool _advanced = false;
+  final _phrase = TextEditingController();
+  final _phrase2 = TextEditingController();
+
+  bool get _usePhrase => _advanced && _phrase.text.isNotEmpty;
+  bool get _phraseSpaces => _phrase.text != _phrase.text.trim();
+  bool get _phraseMismatch => _phrase2.text.isNotEmpty && _phrase2.text != _phrase.text;
+  bool get _phraseOk => !_usePhrase || (!_phraseSpaces && _phrase.text == _phrase2.text);
+
   @override
   void initState() {
     super.initState();
     if (widget.resumeAccount != null && widget.resumeMnemonic != null) {
-      _result = RegisterResult(account: widget.resumeAccount!, mnemonic: widget.resumeMnemonic!);
+      _result = RegisterResult(account: widget.resumeAccount!, mnemonic: widget.resumeMnemonic!, seedPassphrase: widget.resumeSeedPassphrase);
     }
   }
 
   @override
   void dispose() {
     _pair.dispose();
+    _phrase.dispose();
+    _phrase2.dispose();
     super.dispose();
   }
 
   Future<void> _register() async {
-    if (!_pair.valid) return;
+    if (!_pair.valid || !_phraseOk) return;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final res = await backend.register(serverUrl: widget.serverUrl, password: _pair.password.text, deviceName: defaultDeviceName());
+      final res = await backend.register(
+        serverUrl: widget.serverUrl,
+        password: _pair.password.text,
+        deviceName: defaultDeviceName(),
+        seedPassphrase: _usePhrase ? _phrase.text : null,
+      );
       _pair.reset();
+      _phrase.clear();
+      _phrase2.clear();
       setState(() => _result = res);
       widget.onStage(1);
     } catch (e) {
@@ -630,12 +662,68 @@ class _RegisterFlowState extends State<_RegisterFlow> {
         PasswordPairFields(pair: _pair, label: context.t('password.label'), autofocus: true, large: true, onChanged: () => setState(() {})),
         _gap(),
         NoticeBox(text: context.t('onboarding.register.passwordHint')),
+        _gap(),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Semantics(
+            button: true,
+            expanded: _advanced,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _advanced = !_advanced),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  AnimatedRotation(
+                    turns: _advanced ? .25 : 0,
+                    duration: const Duration(milliseconds: 150),
+                    child: AppIcon('chevron', size: 16, color: t.muted),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(context.t('onboarding.seedPass.advanced'), style: ts(14, weight: 600, color: t.muted)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+        if (_advanced) ...[
+          _gap(10),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(t.rCard), border: Border.all(color: t.line)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(context.t('onboarding.seedPass.title'), style: ts(17, weight: 700, color: t.ink)),
+              _gap(4),
+              Text(context.t('onboarding.seedPass.hint'), style: ts(13.5, color: t.muted, height: 1.5)),
+              _gap(14),
+              AppField(
+                controller: _phrase,
+                label: context.t('onboarding.seedPass.label'),
+                password: true,
+                error: _phraseSpaces ? context.t('onboarding.seedPass.spaces') : null,
+                onChanged: (_) => setState(() {}),
+              ),
+              if (_phrase.text.isNotEmpty) ...[
+                _gap(14),
+                AppField(
+                  controller: _phrase2,
+                  label: context.t('onboarding.seedPass.confirm'),
+                  password: true,
+                  error: _phraseMismatch ? context.t('onboarding.seedPass.mismatch') : null,
+                  onChanged: (_) => setState(() {}),
+                ),
+              ],
+              _gap(14),
+              NoticeBox(tone: 'warn', icon: 'alert', text: context.t('onboarding.seedPass.warning')),
+            ]),
+          ),
+        ],
         if (_error != null) ...[_gap(12), _errorText(context, _error)],
         _gap(),
         Btn(
           label: context.t(_busy ? 'onboarding.register.creating' : 'onboarding.register.create'),
           busy: _busy,
-          onPressed: _pair.valid ? _register : null,
+          onPressed: _pair.valid && _phraseOk ? _register : null,
         ),
       ]);
     }
@@ -674,6 +762,7 @@ class _RegisterFlowState extends State<_RegisterFlow> {
       Text(context.t('onboarding.seed.subtitle'), style: ts(13.5, color: t.muted, height: 1.5)),
       _gap(),
       SeedGrid(words: r.mnemonic),
+      if (r.seedPassphrase) ...[_gap(), NoticeBox(tone: 'warn', icon: 'alert', text: context.t('onboarding.seedPass.notShown'))],
       _gap(),
       Semantics(
         checked: _savedIt,
@@ -897,6 +986,7 @@ class _RecoverFormState extends State<_RecoverForm> {
   final _words = List.generate(_wordCount, (_) => TextEditingController());
   final _focus = List.generate(_wordCount, (_) => FocusNode());
   final _pair = PasswordPair();
+  final _phrase = TextEditingController();
   bool _busy = false;
   String? _error;
 
@@ -921,6 +1011,7 @@ class _RecoverFormState extends State<_RecoverForm> {
       f.dispose();
     }
     _pair.dispose();
+    _phrase.dispose();
     super.dispose();
   }
 
@@ -954,6 +1045,7 @@ class _RecoverFormState extends State<_RecoverForm> {
         mnemonic: _words.map((w) => w.text.trim().toLowerCase()).toList(),
         newPassword: _pair.password.text,
         deviceName: defaultDeviceName(),
+        seedPassphrase: _phrase.text.isEmpty ? null : _phrase.text,
       );
       await enterApp();
     } catch (e) {
@@ -1020,6 +1112,13 @@ class _RecoverFormState extends State<_RecoverForm> {
             ),
         ]);
       }),
+      _gap(),
+      AppField(
+        controller: _phrase,
+        label: context.t('onboarding.seedPass.recoverLabel'),
+        description: context.t('onboarding.seedPass.recoverHint'),
+        password: true,
+      ),
       _gap(),
       PasswordPairFields(pair: _pair, large: true, onChanged: () => setState(() {})),
       if (_error != null) ...[_gap(12), _errorText(context, _error)],

@@ -20,6 +20,7 @@ import '../../state/actions.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/dialogs.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/ui.dart';
 import 'attachments.dart';
@@ -76,9 +77,11 @@ class _VoiceRecorderState extends State<VoiceRecorder> {
   String _ext = 'm4a';
   bool _finishing = false;
   bool _viewOnce = false;
-  // Read once: the setting cannot change in the middle of a recording.
-  final bool _mask = prefs.voiceMask;
+  // Starts as the setting says; the button in the recorder changes it for this note. The
+  // format depends on it (masking needs PCM), so changing it starts the recording again.
+  bool _mask = prefs.voiceMask;
   bool _masking = false;
+  bool _restarting = false;
 
   @override
   void initState() {
@@ -138,8 +141,65 @@ class _VoiceRecorderState extends State<VoiceRecorder> {
     }
   }
 
+  /// The ✨ button: the list of voice effects for this note (one button, however many effects
+  /// there are; a new effect is one more row here).
+  Future<void> _pickEffect() async {
+    if (_finishing || _restarting || _masking) return;
+    final picked = await showAppDialog<bool>(context, title: context.t('voiceFx.title'), builder: (ctx) {
+      final t = ctx.tk;
+      Widget row(bool mask, String emoji, String name, [String? note]) => Tap(
+            onTap: () => Navigator.of(ctx).pop(mask),
+            radius: BorderRadius.circular(12),
+            color: mask == _mask ? t.sunk : null,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            semanticLabel: name,
+            child: Row(children: [
+              Text(emoji, style: const TextStyle(fontSize: 22)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name, style: ts(15, weight: 600, color: t.ink)),
+                  if (note != null) Text(note, style: ts(12.5, color: t.muted, height: 1.4)),
+                ]),
+              ),
+              if (mask == _mask) AppIcon('check', size: 18, color: t.accent),
+            ]),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        row(false, '🎙️', ctx.t('voiceFx.none')),
+        const SizedBox(height: 4),
+        row(true, '🕶️', ctx.t('voiceFx.anonymous'), ctx.t('voice.maskToggleOn')),
+      ]);
+    });
+    if (picked != null && picked != _mask) await _setMask();
+  }
+
+  /// Switches the anonymized voice for this note. What was recorded so far is discarded: it
+  /// is in the other format (and, when turning it on, it is the original voice).
+  Future<void> _setMask() async {
+    if (_finishing || _restarting || _masking) return;
+    _restarting = true;
+    final lost = _elapsed > const Duration(seconds: 1);
+    _timer?.cancel();
+    await _ampSub?.cancel();
+    try {
+      await _rec.cancel();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _mask = !_mask;
+      _levels.clear();
+      _all.clear();
+      _startedAt = null;
+      _elapsed = Duration.zero;
+    });
+    showToast([tr(_mask ? 'voice.maskToggleOn' : 'voice.maskToggleOff'), if (lost) tr('voice.maskRestarted')].join('. '));
+    await _start();
+    _restarting = false;
+  }
+
   Future<void> _finish(bool send) async {
-    if (_finishing) return;
+    if (_finishing || _restarting) return;
     _finishing = true;
     _timer?.cancel();
     await _ampSub?.cancel();
@@ -228,6 +288,21 @@ class _VoiceRecorderState extends State<VoiceRecorder> {
               ),
             ),
           ]),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Tooltip(
+        message: context.t('voiceFx.title'),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Tap(
+            onTap: _pickEffect,
+            color: _mask ? t.accent : t.sunk,
+            radius: BorderRadius.circular(22),
+            semanticLabel: '${context.t('voiceFx.title')}: ${context.t(_mask ? 'voiceFx.anonymous' : 'voiceFx.none')}',
+            child: Center(child: AppIcon('sparkles', size: 21, color: _mask ? t.onAccent : t.ink)),
+          ),
         ),
       ),
       const SizedBox(width: 8),

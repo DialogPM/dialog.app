@@ -25,6 +25,9 @@ pub struct RegisterReq {
     server_url: String,
     password: String,
     device_name: String,
+    /// Optional "25th word" (see crypto::apply_seed_passphrase).
+    #[serde(default)]
+    seed_passphrase: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct LoginReq {
@@ -47,6 +50,8 @@ pub struct RecoverReq {
     mnemonic: Vec<String>,
     new_password: String,
     device_name: String,
+    #[serde(default)]
+    seed_passphrase: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct ChangePasswordReq {
@@ -354,12 +359,12 @@ rpc_table! {
     list_blocked() -> Vec<Contact> => |i| i.list_blocked();
     get_state() -> AppState => |i| Ok(i.app_state());
     check_server(req: UrlReq) -> ServerInfo => |i| i.check_server(&req.url).await;
-    register(req: RegisterReq) -> RegisterResult => |i| i.register(&req.server_url, &req.password, &req.device_name).await;
+    register(req: RegisterReq) -> RegisterResult => |i| i.register_with_passphrase(&req.server_url, &req.password, &req.device_name, req.seed_passphrase.as_deref().unwrap_or_default()).await;
     login(req: LoginReq) -> AccountInfo => |i| i.login(&req.server_url, &req.number, &req.password, &req.device_name, req.totp.as_deref()).await;
     totp_setup() -> Value => |i| i.totp_setup().await;
     totp_enable(req: TotpCodeReq) -> () => |i| i.totp_enable(&req.code).await;
     totp_disable(req: TotpCodeReq) -> () => |i| i.totp_disable(&req.code).await;
-    recover(req: RecoverReq) -> AccountInfo => |i| i.recover(&req.server_url, &req.number, &req.mnemonic, &req.new_password, &req.device_name).await;
+    recover(req: RecoverReq) -> AccountInfo => |i| i.recover_with_passphrase(&req.server_url, &req.number, &req.mnemonic, req.seed_passphrase.as_deref().unwrap_or_default(), &req.new_password, &req.device_name).await;
     logout() -> () => |i| i.logout().await;
     get_connection_state() -> ConnState => |i| Ok(i.conn_state.get());
     confirm_mnemonic_saved() -> () => |i| i.confirm_mnemonic_saved();
