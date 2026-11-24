@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../services/user_links.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -312,6 +314,38 @@ class _AccountSection extends ConsumerWidget {
           sub: username != null ? '@$username' : context.t('mobile.usernameNone'),
           onTap: () => _editUsername(context, username),
         ),
+        // The public link of the username (services/user_links.dart): a tap copies it, ready to
+        // send to someone; the button shares it.
+        if (username != null && userLinksAvailable)
+          ListRow(
+            icon: 'link',
+            title: context.t('settings.username.webLink'),
+            sub: '$kUserLinkHost/@$username',
+            chevron: false,
+            onTap: () async {
+              await Clipboard.setData(ClipboardData(text: userLink(username)));
+              notifyOk(tr('qr.linkCopied'));
+            },
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconBtn(
+                'copy',
+                size: 38,
+                iconSize: 18,
+                tooltip: context.t('qr.copyLink'),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: userLink(username)));
+                  notifyOk(tr('qr.linkCopied'));
+                },
+              ),
+              IconBtn(
+                'share',
+                size: 38,
+                iconSize: 18,
+                tooltip: context.t('qr.share'),
+                onPressed: () => SharePlus.instance.share(ShareParams(text: userLink(username), subject: tr('qr.shareTitle'))),
+              ),
+            ]),
+          ),
         if (username != null)
           ListRow(icon: 'qr', title: context.t('settings.username.linkTitle'), sub: context.t('settings.username.linkShow'), onTap: () => showUsernameLink(context)),
         ListRow(icon: 'key', title: context.t('settings.account.changePassword'), sub: context.t('settings.account.changePasswordHint'), onTap: () => _changePassword(context)),
