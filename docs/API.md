@@ -187,6 +187,13 @@ The signature is verified with the stored `recovery_public_key`. On success the 
 **replaces** the password material, **removes all existing devices** (their tokens, keys and
 queued messages) and creates a new device. Response is identical to login.
 
+The same two requests **restore an account that was deleted for inactivity** (see "Inactive
+account deletion" below): the signature is then checked against the recovery public key kept
+with the deleted account's number, and the account is created again with the same number,
+the same `account_id` and the same identity key, the password material of the request and
+one device. Nothing else comes back. An account deleted with `DELETE /v1/account` cannot be
+restored: for its number the requests fail like for an unknown one.
+
 ### Account
 
 `GET /v1/account` (auth)
@@ -199,6 +206,7 @@ queued messages) and creates a new device. Response is identical to login.
   "phone": "+40722000000" | null,
   "phone_verified": true,
   "discoverable_by_phone": false,
+  "inactive_delete_days": 365,
   "privacy": { "last_seen": "everyone" | "nobody" },
   "username": "name" | null,
   "totp_enabled": false,
@@ -237,6 +245,37 @@ another account had the same verified phone, it is removed from that account.
 `DELETE /v1/account/phone` (auth)
 
 `PUT /v1/account/discoverable` (auth) — `{ "discoverable": true }`
+
+### Inactive account deletion (server-rs only)
+
+An account none of whose devices connected for a period chosen by its user is deleted by the
+server. `inactive_delete_days` of `GET /v1/account` is that period in days: `365` for a new
+account, `0` = never. Clients treat a missing field as "this server does not delete inactive
+accounts".
+
+`PUT /v1/account/inactive-deletion` (auth) — `{ "days": 30 | 60 | 90 | 365 | 730 | 1095 | 1825 | 0 }`.
+Response `{ "inactive_delete_days": 365 }`. Any other value is a `400 bad_request`.
+
+- **Activity** is an authenticated request or WebSocket connection of any device of the
+  account (recorded on the account to the hour; a socket that stays open keeps the account
+  active). Changing the period is activity too, so a shorter period never deletes the
+  account at once. Messages received while away, and the account's bots talking to the Bot
+  API, are not activity.
+- **The job** (the maintenance job, every `CHATAPP_JOB_INTERVAL_SECONDS`, 600 by default)
+  deletes up to 200 due accounts per run exactly like `DELETE /v1/account` does: devices
+  (which wipe themselves when they next reach the server, see "Device revocation check"),
+  keys, queued messages, profile, username (reserved for a while, as for any released
+  username), vault, phone, bots, group memberships and attachments. Banned accounts are
+  never deleted by the job (deleting one would lift its ban).
+  `CHATAPP_INACTIVE_ACCOUNT_DELETION=false` turns the job off; the periods stay stored.
+- **What is kept.** The tombstone of the account number, which already keeps the number and
+  the account id of every deleted account, also keeps the recovery public key and the
+  identity public key of an account deleted *for inactivity*. `POST /v1/auth/recover` with the
+  number and the recovery phrase restores the account from them (see "Recovery with the
+  seed") and clears them. The restored account starts again with the default period.
+- **Upgrade.** Existing accounts get the default of 365 days, counted from their real last
+  activity; an account that would be due within 30 days of the migration is given those 30
+  days, so nothing is deleted when the server is upgraded.
 
 ---
 

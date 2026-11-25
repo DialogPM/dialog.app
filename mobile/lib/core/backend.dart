@@ -609,6 +609,9 @@ class Backend {
   Future<void> verifyPhone({required String phone, required String code}) => call('verify_phone', {'phone': phone, 'code': code});
   Future<void> removePhone() => call('remove_phone');
   Future<void> setDiscoverable(bool discoverable) => call('set_discoverable', {'discoverable': discoverable});
+
+  /// After how many days without any connection the server deletes the account (0 = never).
+  Future<void> setInactiveDeletion(int days) => call('set_inactive_deletion', {'days': days});
   Future<List<DeviceInfo>> listDevices() async => (await _list('list_devices')).map(DeviceInfo.fromJson).toList();
   Future<void> unlinkDevice(int deviceId) => call('unlink_device', {'device_id': deviceId});
   Future<void> renameDevice(String name) => call('rename_device', {'name': name});

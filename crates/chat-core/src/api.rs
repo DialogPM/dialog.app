@@ -202,6 +202,10 @@ pub struct AccountDto {
     /// New password logins need approval from one of the account's devices.
     #[serde(default)]
     pub login_approval: bool,
+    /// Days without any connection after which the server deletes the account (0 = never).
+    /// Missing from servers without inactive account deletion.
+    #[serde(default)]
+    pub inactive_delete_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

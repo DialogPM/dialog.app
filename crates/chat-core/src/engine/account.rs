@@ -30,6 +30,9 @@ async fn derive_password(password: String, kdf: KdfParams) -> Result<crypto::Pas
         .ctx("password derivation task")?
 }
 
+/// The periods offered for the deletion of an inactive account, in days (0 = never).
+pub const INACTIVE_DELETE_CHOICES: [i64; 8] = [30, 60, 90, 365, 730, 1095, 1825, 0];
+
 /// The account secret behind the 24 words and the seed passphrase (Argon2id: off the UI thread).
 async fn derive_seed_secret(entropy: AccountSecret, passphrase: String) -> Result<AccountSecret> {
     if passphrase.is_empty() {
@@ -644,6 +647,7 @@ impl Inner {
             login_approval: dto.login_approval,
             local_password_outdated,
             password_weak: self.db.borrow().kv_get_json("password_weak").ok().flatten().unwrap_or(false),
+            inactive_delete_days: dto.inactive_delete_days,
         })
     }
 
@@ -734,6 +738,20 @@ impl Inner {
             .put("/v1/account/discoverable", &json!({ "discoverable": discoverable }))
             .await?;
         Ok(())
+    }
+
+    /// After how many days without any connection the server deletes the account
+    /// (30, 60, 90, 365, 730, 1095 or 1825; 0 = never). Returns the period now in force.
+    pub async fn set_inactive_deletion(&self, days: i64) -> Result<i64> {
+        if !INACTIVE_DELETE_CHOICES.contains(&days) {
+            return Err(CoreError::invalid("days must be 30, 60, 90, 365, 730, 1095, 1825 or 0 (never)"));
+        }
+        #[derive(Deserialize)]
+        struct Resp {
+            inactive_delete_days: i64,
+        }
+        let r: Resp = self.session()?.api.put("/v1/account/inactive-deletion", &json!({ "days": days })).await?;
+        Ok(r.inactive_delete_days)
     }
 
     /// Sets (or removes, with None / "") the public username.

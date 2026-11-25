@@ -537,6 +537,10 @@ pub struct AccountDetails {
     pub local_password_outdated: bool,
     /// The account password is below the current password rules: ask to change it.
     pub password_weak: bool,
+    /// The server deletes the account after this many days without any connection from its
+    /// devices (0 = never); the recovery phrase can then create it again. None: the server
+    /// does not delete inactive accounts.
+    pub inactive_delete_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

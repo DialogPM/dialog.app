@@ -83,8 +83,7 @@ pub struct EnabledReq {
     enabled: bool,
 }
 #[derive(Deserialize)]
-pub struct MediaRetentionReq {
-    /// 1, 7, 14 or 30.
+pub struct DaysReq {
     days: i64,
 }
 #[derive(Deserialize)]
@@ -430,7 +429,7 @@ rpc_table! {
     set_call_settings(req: crate::engine::CallSettingsPatch) -> crate::engine::CallSettings => |i| i.set_call_settings(req).await;
     // Media retention period and the media check (engine/retention.rs).
     get_media_retention() -> crate::engine::retention::MediaRetention => |i| Ok(i.get_media_retention());
-    set_media_retention(req: MediaRetentionReq) -> crate::engine::retention::MediaRetention => |i| i.set_media_retention(req.days).await;
+    set_media_retention(req: DaysReq) -> crate::engine::retention::MediaRetention => |i| i.set_media_retention(req.days).await;
     // Timer of the conversations we start (engine/default_timer.rs).
     get_default_disappearing() -> crate::engine::DefaultDisappearing => |i| Ok(i.get_default_disappearing());
     set_default_disappearing(req: DefaultDisappearingReq) -> crate::engine::DefaultDisappearing => |i| i.set_default_disappearing(req.seconds).await;
@@ -442,6 +441,7 @@ rpc_table! {
     verify_phone(req: VerifyPhoneReq) -> () => |i| i.verify_phone(&req.phone, &req.code).await;
     remove_phone() -> () => |i| i.remove_phone().await;
     set_discoverable(req: DiscoverableReq) -> () => |i| i.set_discoverable(req.discoverable).await;
+    set_inactive_deletion(req: DaysReq) -> i64 => |i| i.set_inactive_deletion(req.days).await;
     list_devices() -> Vec<DeviceInfo> => |i| i.list_devices().await;
     unlink_device(req: DeviceIdReq) -> () => |i| i.unlink_device(req.device_id).await;
     rename_device(req: NameReq) -> () => |i| i.rename_device(&req.name).await;

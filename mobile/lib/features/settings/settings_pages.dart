@@ -356,6 +356,7 @@ class _AccountSection extends ConsumerWidget {
       ]),
       const _PhoneCard(),
       const _ThisPhoneCard(),
+      const _InactiveDeletionCard(),
       Align(
         alignment: Alignment.centerLeft,
         child: GestureDetector(
@@ -656,6 +657,48 @@ class _ThisPhoneCardState extends State<_ThisPhoneCard> {
           onToggle: _toggle,
         ),
       ]),
+    ]);
+  }
+}
+
+/// The periods offered by the server (days; 0 = never), in the order shown.
+const _inactiveDeleteChoices = [30, 60, 90, 365, 730, 1095, 1825, 0];
+
+/// After how long without any connection the server deletes the account (a year unless the
+/// user chooses otherwise). Hidden on servers that do not delete inactive accounts.
+class _InactiveDeletionCard extends ConsumerWidget {
+  const _InactiveDeletionCard();
+
+  Future<void> _choose(BuildContext context, int days) async {
+    final v = await showOptions(
+      context,
+      title: context.t('settings.inactive.title'),
+      description: context.t('settings.inactive.hint'),
+      initial: '$days',
+      options: [for (final d in _inactiveDeleteChoices) ('$d', context.t('settings.inactive.opt.$d'))],
+    );
+    if (v == null) return;
+    await attempt(() async {
+      await backend.setInactiveDeletion(int.parse(v));
+      await refreshDetails();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final days = ref.watch(storeProvider.select((s) => s.details?.inactiveDeleteDays));
+    if (days == null) return const SizedBox.shrink();
+    return ListCard(children: [
+      ListRow(
+        icon: 'trash',
+        title: context.t('settings.inactive.title'),
+        sub: context.t('settings.inactive.opt.$days'),
+        onTap: () => _choose(context, days),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Text(context.t('settings.inactive.hint'), style: ts(13, color: context.tk.muted)),
+      ),
     ]);
   }
 }

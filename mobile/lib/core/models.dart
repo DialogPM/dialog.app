@@ -1015,6 +1015,10 @@ class AccountDetails {
   /// New password logins must be approved on one of the account's devices.
   final bool loginApproval;
 
+  /// The server deletes the account after this many days without any connection from its
+  /// devices (0 = never). null: the server does not delete inactive accounts.
+  final int? inactiveDeleteDays;
+
   const AccountDetails({
     required this.account,
     this.username,
@@ -1026,6 +1030,7 @@ class AccountDetails {
     this.localPasswordOutdated = false,
     this.passwordWeak = false,
     this.loginApproval = false,
+    this.inactiveDeleteDays,
   });
 
   factory AccountDetails.fromJson(Json j) => AccountDetails(
@@ -1039,6 +1044,7 @@ class AccountDetails {
         localPasswordOutdated: _bool(j['local_password_outdated']),
         passwordWeak: _bool(j['password_weak']),
         loginApproval: _bool(j['login_approval']),
+        inactiveDeleteDays: (j['inactive_delete_days'] as num?)?.toInt(),
       );
 
   AccountDetails copyWith({
@@ -1060,6 +1066,7 @@ class AccountDetails {
         localPasswordOutdated: localPasswordOutdated ?? this.localPasswordOutdated,
         passwordWeak: passwordWeak,
         loginApproval: loginApproval ?? this.loginApproval,
+        inactiveDeleteDays: inactiveDeleteDays,
       );
 }
 
