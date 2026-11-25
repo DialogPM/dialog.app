@@ -280,6 +280,12 @@ CREATE TABLE bots (
     deleted       INTEGER NOT NULL DEFAULT 0,
     fetched_at    INTEGER NOT NULL DEFAULT 0
 );
+"#, r#"
+-- 19: the buttons under a bot's message (engine/bots.rs), as rows of {text, data | url}.
+CREATE TABLE bot_buttons (
+    message_id TEXT PRIMARY KEY,
+    json       TEXT NOT NULL
+);
 "#];
 
 pub struct Db {

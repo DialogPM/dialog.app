@@ -788,6 +788,7 @@ class Backend {
   Future<Conversation> botOpen(String botId) async => Conversation.fromJson(await _obj('bot_open', {'bot_id': botId}));
   Future<Conversation> botStart(String botId) async => Conversation.fromJson(await _obj('bot_start', {'bot_id': botId}));
   Future<Conversation> botStop(String botId) async => Conversation.fromJson(await _obj('bot_stop', {'bot_id': botId}));
+  Future<void> botPress(String messageId, String data) => call('bot_press', {'message_id': messageId, 'data': data});
   Future<List<OwnedBot>> botsList() async => (await _list('bots_list')).map(OwnedBot.fromJson).toList();
 
   /// The new bot with its token (shown once).

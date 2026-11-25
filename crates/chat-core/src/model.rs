@@ -365,6 +365,20 @@ pub struct Message {
     /// ordinary messages. The media of such a message is never in `attachments[].local_path`
     /// or `thumbnail`: it is shown only through `open_view_once`.
     pub view_once: Option<String>,
+    /// A bot's message: the rows of buttons under it (engine/bots.rs).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub buttons: Vec<Vec<BotButton>>,
+}
+
+/// A button under a bot's message: pressing it tells the bot (`data`, with `bot_press`) or
+/// opens a link (`url`, always https).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BotButton {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// An @mention: `text[start..start+length]` (UTF-16 code units, as in JS and Dart strings)

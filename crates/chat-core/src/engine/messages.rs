@@ -316,6 +316,7 @@ impl Inner {
             pinned_until: marks.pinned_until,
             starred: marks.starred_until.is_some(),
             view_once: super::view_once::state_label(row.view_once),
+            buttons: if row.outgoing || row.deleted { Vec::new() } else { self.bot_buttons(&row.id) },
         })
     }
 

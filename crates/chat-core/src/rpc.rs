@@ -148,6 +148,11 @@ pub struct BotTestReq {
     text: String,
 }
 #[derive(Deserialize)]
+pub struct BotPressReq {
+    message_id: String,
+    data: String,
+}
+#[derive(Deserialize)]
 pub struct BotFindReq {
     username: String,
 }
@@ -451,6 +456,7 @@ rpc_table! {
     bot_open(req: BotIdReq) -> Conversation => |i| i.bot_open(&req.bot_id).await;
     bot_start(req: BotIdReq) -> Conversation => |i| i.bot_start(&req.bot_id).await;
     bot_stop(req: BotIdReq) -> Conversation => |i| i.bot_stop(&req.bot_id).await;
+    bot_press(req: BotPressReq) -> () => |i| i.bot_press(&req.message_id, &req.data).await;
     bots_list() -> Vec<OwnedBot> => |i| i.bots_list().await;
     bot_create(req: BotCreateReq) -> BotCreated => |i| i.bot_create(&req.username, &req.name, &req.about).await;
     bot_update(req: BotUpdateReq) -> OwnedBot => |i| i.bot_update(&req.bot_id, req.name, req.about, req.commands).await;

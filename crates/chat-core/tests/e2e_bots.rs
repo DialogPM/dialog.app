@@ -236,3 +236,116 @@ async fn a_bot_from_creation_to_deletion() {
     owner.shutdown().await;
     user.shutdown().await;
 }
+
+/// A 1x1 PNG.
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_bot_sends_pictures_and_buttons() {
+    if server().is_empty() {
+        eprintln!("CHATAPP_E2E_SERVER not set, skipping");
+        return;
+    }
+    let _ = env_logger::builder().try_init();
+    let base = tempfile::tempdir().unwrap();
+    let url = server();
+    let owner = device(&base.path().join("owner"));
+    let u = url.clone();
+    let owner_acc = owner.run(move |i| async move { i.register(&u, PASSWORD, "owner").await }).await.unwrap().account;
+    let user = device(&base.path().join("user"));
+    let u = url.clone();
+    user.run(move |i| async move { i.register(&u, PASSWORD, "user").await }).await.unwrap();
+
+    let name = format!("p{}_bot", &owner_acc.account_id[..8]);
+    let created = owner.run(move |i| async move { i.bot_create(&name, "Camera", "").await }).await.unwrap();
+    let (bot_id, token) = (created.bot.id.clone(), created.token.clone());
+    let id = bot_id.clone();
+    let conv = user.run(move |i| async move { i.bot_start(&id).await }).await.unwrap();
+    let ups = updates(&token, 0).await;
+    let chat = ups[0]["message"]["chat"]["id"].as_str().unwrap().to_string();
+    let next = ups[0]["update_id"].as_i64().unwrap() + 1;
+
+    // Buttons: one that answers the bot, one that opens a link. Telegram's spelling works too.
+    let (status, sent) = bot_api(
+        &token,
+        "sendMessage",
+        json!({"chat_id": chat, "text": "Motion at the door", "buttons": [[{"text": "Ignore", "data": "ignore:7"}, {"text": "Live", "url": "https://example.org/cam"}]]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{sent}");
+    let all = wait_messages(&user, &conv.id, "the message with buttons", |m| m.iter().any(|m| m.text.as_deref() == Some("Motion at the door"))).await;
+    let with_buttons = all.iter().find(|m| m.text.as_deref() == Some("Motion at the door")).unwrap().clone();
+    assert_eq!(with_buttons.buttons.len(), 1);
+    let row = &with_buttons.buttons[0];
+    assert_eq!((row[0].text.as_str(), row[0].data.as_deref(), row[0].url.as_deref()), ("Ignore", Some("ignore:7"), None));
+    assert_eq!((row[1].text.as_str(), row[1].data.as_deref(), row[1].url.as_deref()), ("Live", None, Some("https://example.org/cam")));
+    let (status, _) = bot_api(&token, "sendMessage", json!({"chat_id": chat, "text": "tg", "reply_markup": {"inline_keyboard": [[{"text": "Ok", "callback_data": "ok"}]]}})).await;
+    assert_eq!(status, 200);
+    // What a button may not be.
+    for bad in [json!([[{"text": "x", "url": "http://example.org"}]]), json!([[{"text": "x", "url": "javascript:alert(1)"}]]), json!([[{"text": "x"}]]), json!([[{"text": "", "data": "d"}]])] {
+        let (status, body) = bot_api(&token, "sendMessage", json!({"chat_id": chat, "text": "bad", "buttons": bad})).await;
+        assert_eq!(status, 400, "{body}");
+    }
+
+    // Pressing tells the bot which button of which message; only a real button can be pressed.
+    let (mid, wrong) = (with_buttons.id.clone(), with_buttons.id.clone());
+    user.run(move |i| async move { i.bot_press(&mid, "ignore:7").await }).await.unwrap();
+    assert!(user.run(move |i| async move { i.bot_press(&wrong, "made-up").await }).await.is_err());
+    let ups = updates(&token, next).await;
+    assert_eq!(ups.len(), 1, "{ups:?}");
+    let cb = &ups[0]["callback_query"];
+    assert_eq!((cb["data"].as_str(), cb["message_id"].as_str(), cb["chat"]["id"].as_str()), (Some("ignore:7"), Some(with_buttons.id.as_str()), Some(chat.as_str())));
+
+    // A picture, as the request body, with a caption.
+    use base64::Engine;
+    let png = base64::engine::general_purpose::STANDARD.decode(PNG).unwrap();
+    let resp = reqwest::Client::new()
+        .post(format!("{}/bot/{token}/sendPhoto?chat_id={chat}&caption=Front%20door", server()))
+        .header("Content-Type", "image/png")
+        .body(png.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200, "{}", resp.text().await.unwrap_or_default());
+    let all = wait_messages(&user, &conv.id, "the picture", |m| {
+        m.iter().any(|m| m.text.as_deref() == Some("Front door") && m.attachments.first().is_some_and(|a| a.download_state == "done"))
+    })
+    .await;
+    let pic = all.iter().find(|m| m.text.as_deref() == Some("Front door")).unwrap();
+    assert_eq!(pic.kind, "image");
+    let a = &pic.attachments[0];
+    assert_eq!((a.mime.as_str(), a.width, a.height), ("image/png", Some(1), Some(1)));
+    // The local copy is encrypted at rest like all media; the export is the picture itself.
+    let out = base.path().join("exported.png");
+    let (mid, aid, dest) = (pic.id.clone(), a.id.clone(), out.to_string_lossy().to_string());
+    user.run(move |i| async move { i.save_attachment(&mid, &aid, &dest).await }).await.unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), png, "the picture arrives as the bot sent it");
+
+    // As base64 in JSON, without a caption.
+    let (status, body) = bot_api(&token, "sendPhoto", json!({"chat_id": chat, "photo": PNG})).await;
+    assert_eq!(status, 200, "{body}");
+    wait_messages(&user, &conv.id, "the second picture", |m| m.iter().filter(|m| m.kind == "image").count() == 2).await;
+
+    // Not a picture, whatever it calls itself; and nothing reaches a chat that is not the bot's.
+    let resp = reqwest::Client::new()
+        .post(format!("{}/bot/{token}/sendPhoto?chat_id={chat}", server()))
+        .header("Content-Type", "image/png")
+        .body("<svg xmlns='http://www.w3.org/2000/svg'/>")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 400);
+    let (status, _) = bot_api(&token, "sendPhoto", json!({"chat_id": "0123456789abcdef0123456789abcdef", "photo": PNG})).await;
+    assert_eq!(status, 400);
+
+    // After a stop neither pictures nor presses go through.
+    let id = bot_id.clone();
+    user.run(move |i| async move { i.bot_stop(&id).await }).await.unwrap();
+    let (status, body) = bot_api(&token, "sendPhoto", json!({"chat_id": chat, "photo": PNG})).await;
+    assert_eq!((status, body["reason"].as_str()), (403, Some("bot_stopped")));
+    let mid = with_buttons.id.clone();
+    assert_eq!(user.run(move |i| async move { i.bot_press(&mid, "ignore:7").await }).await.unwrap_err().code, ErrorCode::Forbidden);
+
+    owner.shutdown().await;
+    user.shutdown().await;
+}

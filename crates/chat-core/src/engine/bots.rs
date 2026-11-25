@@ -23,9 +23,9 @@ use serde_json::{json, Value};
 
 use super::Inner;
 use crate::api::ApiErrorOrNet;
-use crate::content::{Content, DataMessage};
+use crate::content::{AttachmentPointer, Content, DataMessage};
 use crate::error::{CoreError, ErrorCode, Result};
-use crate::model::{BotCommand, BotCreated, BotInfo, BotSubscriber, Conversation, OwnedBot};
+use crate::model::{BotButton, BotCommand, BotCreated, BotInfo, BotSubscriber, Conversation, OwnedBot};
 use crate::util::{is_id, new_id, now_ms};
 
 /// Envelope type of a bot's message (plain JSON content; only the server creates it).
@@ -71,9 +71,53 @@ struct OwnedBotsDto {
 #[derive(Deserialize)]
 struct BotMessage {
     id: String,
+    #[serde(default)]
     text: String,
     #[serde(default)]
     sent_at: i64,
+    #[serde(default)]
+    photo: Option<BotPhoto>,
+    #[serde(default)]
+    buttons: Vec<Vec<BotButton>>,
+}
+
+/// A picture a bot sent: a server attachment, stored as the bot uploaded it (not encrypted).
+#[derive(Deserialize)]
+struct BotPhoto {
+    id: String,
+    #[serde(default)]
+    mime: String,
+    #[serde(default)]
+    size: i64,
+}
+
+/// The server's limits, enforced here too (the server is not trusted to keep its own).
+const MAX_BUTTON_ROWS: usize = 8;
+const MAX_BUTTONS_PER_ROW: usize = 4;
+const MAX_BUTTON_TEXT: usize = 40;
+const MAX_BUTTON_DATA: usize = 64;
+const MAX_BUTTON_URL: usize = 512;
+const MAX_BOT_PHOTO: i64 = 10 << 20;
+
+/// The buttons worth showing: text and exactly one of data or an https link.
+fn clean_buttons(rows: Vec<Vec<BotButton>>) -> Vec<Vec<BotButton>> {
+    rows.into_iter()
+        .take(MAX_BUTTON_ROWS)
+        .map(|row| {
+            row.into_iter()
+                .take(MAX_BUTTONS_PER_ROW)
+                .filter_map(|b| {
+                    let text: String = crate::sanitize::clean_display_text(&b.text, MAX_BUTTON_TEXT).trim().to_string();
+                    let data = b.data.filter(|d| !d.is_empty() && d.len() <= MAX_BUTTON_DATA && !d.chars().any(char::is_control));
+                    let url = b.url.filter(|u| {
+                        u.len() <= MAX_BUTTON_URL && u.starts_with("https://") && !u.chars().any(|c| c.is_control() || c.is_whitespace())
+                    });
+                    (!text.is_empty() && data.is_some() != url.is_some()).then_some(BotButton { text, data, url })
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|row| !row.is_empty())
+        .collect()
 }
 
 fn state_of(s: Option<&str>) -> &'static str {
@@ -342,7 +386,10 @@ impl Inner {
             log::warn!("dropping a malformed bot message");
             return Ok(());
         };
-        if !is_id(&m.id) || m.text.trim().is_empty() || m.text.chars().count() > MAX_BOT_TEXT {
+        let photo = m.photo.filter(|p| {
+            p.size > 0 && p.size <= MAX_BOT_PHOTO && !p.id.is_empty() && p.id.len() <= 64 && p.id.bytes().all(|b| b.is_ascii_alphanumeric())
+        });
+        if !is_id(&m.id) || (m.text.trim().is_empty() && photo.is_none()) || m.text.chars().count() > MAX_BOT_TEXT {
             log::warn!("dropping a malformed bot message");
             return Ok(());
         }
@@ -360,8 +407,66 @@ impl Inner {
         // The server delivers only into a started chat.
         self.db.borrow().conn.execute("UPDATE bots SET state = 'active' WHERE account_id = ?1 AND state = 'none'", [bot_id])?;
         let conv = self.ensure_bot_conversation(bot_id)?;
-        let data = DataMessage { id: m.id, body: Some(m.text), sent_at: m.sent_at, ..Default::default() };
+        let buttons = clean_buttons(m.buttons);
+        if !buttons.is_empty() {
+            // Before the message itself, so that it is shown with its buttons from the start.
+            self.db.borrow().conn.execute(
+                "INSERT OR IGNORE INTO bot_buttons (message_id, json) VALUES (?1, ?2)",
+                params![m.id, serde_json::to_string(&buttons)?],
+            )?;
+        }
+        // An empty key marks the picture as not encrypted; `download_attachment` accepts
+        // that from a bot only.
+        let attachments = photo
+            .map(|p| AttachmentPointer {
+                cdn_id: p.id,
+                key: String::new(),
+                digest: String::new(),
+                size: p.size,
+                mime: p.mime,
+                file_name: "photo".into(),
+                kind: "image".into(),
+                width: None,
+                height: None,
+                duration_ms: None,
+                waveform: None,
+                thumbnail: None,
+            })
+            .into_iter()
+            .collect();
+        let body = Some(m.text).filter(|t| !t.trim().is_empty());
+        let data = DataMessage { id: m.id, body, attachments, sent_at: m.sent_at, ..Default::default() };
         self.apply_data(&conv, bot_id, 0, data, false)
+    }
+
+    /// The buttons under a bot's message (none for any other message).
+    pub(super) fn bot_buttons(&self, message_id: &str) -> Vec<Vec<BotButton>> {
+        let json: Option<String> = self
+            .db
+            .borrow()
+            .conn
+            .query_row("SELECT json FROM bot_buttons WHERE message_id = ?1", [message_id], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten();
+        json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    }
+
+    /// The user pressed a button of a bot's message: the bot is told the button's data.
+    pub async fn bot_press(&self, message_id: &str, data: &str) -> Result<()> {
+        let row = self.message_row(message_id)?.ok_or_else(|| CoreError::not_found("message not found"))?;
+        let known = self.bot_buttons(message_id).iter().flatten().any(|b| b.data.as_deref() == Some(data));
+        if row.outgoing || !known || !self.is_bot(&row.sender_account_id) {
+            return Err(CoreError::invalid("this message has no such button"));
+        }
+        let bot_id = row.sender_account_id;
+        self.check_can_send_to_bot(&bot_id, true)?;
+        let api = self.session()?.api.clone();
+        let _: Value = api
+            .send_json(reqwest::Method::POST, &format!("/v1/bots/{bot_id}/callback"), Some(&json!({"message_id": message_id, "data": data})))
+            .await
+            .map_err(bot_error)?;
+        Ok(())
     }
 
     /// The server's word on every bot this account ever started: restores bot conversations

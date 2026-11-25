@@ -313,17 +313,24 @@ impl Inner {
         let (Some(cdn), Some(key), Some(digest)) = (a.cdn_id.clone(), a.key.clone(), a.digest.clone()) else {
             return Err(CoreError::internal("attachment has no remote copy"));
         };
+        // A bot's picture is stored on the server as the bot uploaded it: nothing to decrypt
+        // (engine/bots.rs). Only for messages of a bot: anyone else's attachment has a key.
+        let from_bot = key.is_empty() && !row.outgoing && self.is_bot(&row.sender_account_id);
         self.set_attachment_state(message_id, att_id, "downloading", None)?;
         let declared_image = a.kind == "image" || a.mime.starts_with("image/");
         let result: Result<(String, Option<Option<(&'static str, u32, u32)>>)> = async {
             let api = self.session()?.api.clone();
             let padded = crypto::padded_attachment_size(a.size.max(0) as usize, usize::MAX);
             let data = api.download_attachment(&cdn, padded + 1024 * 1024).await?;
-            let key = unb64(&key)?;
-            let digest = unb64(&digest)?;
-            let mut plain = tokio::task::spawn_blocking(move || crypto::decrypt_attachment(&key, &digest, &data))
-                .await
-                .ctx("decrypt task")??;
+            let mut plain = if from_bot {
+                data
+            } else {
+                let key = unb64(&key)?;
+                let digest = unb64(&digest)?;
+                tokio::task::spawn_blocking(move || crypto::decrypt_attachment(&key, &digest, &data))
+                    .await
+                    .ctx("decrypt task")??
+            };
             // Cut the size padding off (the real size travels inside the encrypted message).
             if a.size >= 0 && plain.len() > a.size as usize {
                 plain.truncate(a.size as usize);

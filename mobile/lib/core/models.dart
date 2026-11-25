@@ -550,6 +550,9 @@ class Message {
   /// Such messages never carry a local path or thumbnail (see [Backend.openViewOnce]).
   final String? viewOnce;
 
+  /// A bot's message: the rows of buttons under it (empty for everything else).
+  final List<List<BotButton>> buttons;
+
   bool get isViewOnce => viewOnce != null;
 
   const Message({
@@ -579,6 +582,7 @@ class Message {
     this.pinnedUntil,
     this.starred = false,
     this.viewOnce,
+    this.buttons = const [],
   });
 
   factory Message.fromJson(Json j) => Message(
@@ -608,6 +612,7 @@ class Message {
         pinnedUntil: _intOrNull(j['pinned_until']),
         starred: _bool(j['starred']),
         viewOnce: _str(j['view_once']),
+        buttons: _botButtons(j['buttons']),
       );
 }
 
@@ -1483,3 +1488,20 @@ class BotSubscriber {
   factory BotSubscriber.fromJson(Json j) =>
       BotSubscriber(chatId: _str(j['chat_id']) ?? '', since: _intOrNull(j['since']) ?? 0, mine: _bool(j['mine']));
 }
+
+/// A button under a bot's message: it tells the bot ([data]) or opens an https link ([url]).
+class BotButton {
+  final String text;
+  final String? data;
+  final String? url;
+  const BotButton({required this.text, this.data, this.url});
+  factory BotButton.fromJson(Json j) => BotButton(text: _str(j['text']) ?? '', data: _str(j['data']), url: _str(j['url']));
+}
+
+List<List<BotButton>> _botButtons(Object? v) => v is List
+    ? v
+        .whereType<List>()
+        .map((row) => row.whereType<Map>().map((b) => BotButton.fromJson(Json.from(b))).where((b) => b.text.isNotEmpty && (b.data != null) != (b.url != null)).toList())
+        .where((row) => row.isNotEmpty)
+        .toList()
+    : const [];

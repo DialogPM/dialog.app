@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../app/globals.dart';
 import '../../app/nav.dart';
 import '../../core/models.dart';
@@ -421,6 +422,91 @@ class BotInfoPage extends StatelessWidget {
             Btn(label: context.t('bots.manage'), icon: 'gear', kind: BtnKind.secondary, height: 46, onPressed: () => openSettingsSection('bots')),
           ],
         ],
+      ]),
+    );
+  }
+}
+
+/// The buttons under a bot's message. One kind tells the bot it was pressed; the other
+/// opens a link, after showing where it leads.
+class BotButtons extends StatefulWidget {
+  const BotButtons({super.key, required this.message, this.enabled = true});
+  final Message message;
+  final bool enabled;
+
+  @override
+  State<BotButtons> createState() => _BotButtonsState();
+}
+
+class _BotButtonsState extends State<BotButtons> {
+  String? _busy;
+  String? _done;
+
+  Future<void> _press(String key, BotButton b) async {
+    final url = b.url;
+    if (url != null) {
+      final ok = await showConfirm(context, title: tr('bots.openLinkTitle'), body: url, confirmLabel: tr('bots.openLink'), danger: false);
+      final uri = Uri.tryParse(url);
+      if (ok && uri != null && uri.scheme == 'https') await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    final data = b.data;
+    if (data == null || _busy != null) return;
+    setState(() => _busy = key);
+    try {
+      await backend.botPress(widget.message.id, data);
+      if (mounted) setState(() => _done = key);
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && _done == key) setState(() => _done = null);
+      });
+    } catch (e) {
+      notifyError(e);
+    }
+    if (mounted) setState(() => _busy = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tk;
+    final rows = widget.message.buttons;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 6, 2, 2),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        for (var i = 0; i < rows.length; i++)
+          Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 0 : 6),
+            child: Row(children: [
+              for (var j = 0; j < rows[i].length; j++) ...[
+                if (j > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: Opacity(
+                    opacity: _busy == '$i:$j' ? .6 : 1,
+                    child: Tap(
+                      key: ValueKey('bot-button-$i-$j'),
+                      onTap: widget.enabled ? () => unawaited(_press('$i:$j', rows[i][j])) : null,
+                      color: t.accentSoft,
+                      radius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        height: 38,
+                        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Flexible(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(rows[i][j].text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(13.5, weight: 650, color: t.accentText)),
+                            ),
+                          ),
+                          if (rows[i][j].url != null)
+                            Padding(padding: const EdgeInsets.only(right: 8), child: AppIcon('external', size: 13, color: t.accentText))
+                          else if (_done == '$i:$j')
+                            Padding(padding: const EdgeInsets.only(right: 8), child: AppIcon('check', size: 13, color: t.accentText)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
+          ),
       ]),
     );
   }

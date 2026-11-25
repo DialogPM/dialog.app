@@ -1105,10 +1105,18 @@ A bot's message reaches each device of the account as an envelope of **type 9** 
 `source_account` = the bot's id, `source_device` = 0 and the content (base64 of JSON)
 
 ```json
-{ "id": "<uuid>", "text": "Rain at 5 pm", "sent_at": 1730000000000, "silent": true }
+{ "id": "<uuid>", "text": "Rain at 5 pm", "sent_at": 1730000000000, "silent": true,
+  "photo": { "id": "<attachment id>", "mime": "image/jpeg", "size": 48213 },
+  "buttons": [[ { "text": "Ignore", "data": "ignore:7" }, { "text": "Live", "url": "https://…" } ]] }
 ```
 
-(`silent` only when set). Clients accept type 9 only from an id the server describes as a bot
+(`silent`, `photo` and `buttons` only when set; with a `photo`, `text` is its caption and may
+be empty). The photo is an attachment (section 9) stored as the bot uploaded it, not
+encrypted: clients fetch it with `GET /v1/attachments/{id}` and check its type themselves.
+
+`POST /v1/bots/{id}/callback` (auth) `{"message_id","data"}` → 204: the caller pressed a button
+of one of the bot's messages; the bot gets a `callback_query` update. Only in an `active`
+chat. `data` is at most 64 bytes. Clients accept type 9 only from an id the server describes as a bot
 (`GET /v1/bots/{id}`); the server refuses type 9 from clients.
 
 ### Bot API
@@ -1126,16 +1134,36 @@ curl https://chat.example.org/bot/$TOKEN/sendMessage -d chat_id=$CHAT --data-url
 |---|---|---|
 | `getMe` | | `{"id","username","name","about","commands"}` |
 | `getUpdates` | `offset`, `limit` (1–100), `timeout` (seconds, ≤ 50) | array of updates |
-| `sendMessage` | `chat_id`, `text` (≤ 4096 characters), `silent` (or `disable_notification`) | `{"message_id","date","chat":{"id"}}` |
+| `sendMessage` | `chat_id`, `text` (≤ 4096 characters), `silent` (or `disable_notification`), `buttons` | `{"message_id","date","chat":{"id"}}` |
+| `sendPhoto` | `chat_id`, the picture, `caption`, `silent`, `buttons` | `{"message_id","date","chat":{"id"}}` |
 | `setMyCommands` | `commands`: array of `{"command","description"}` | `true` |
 | `getMyCommands` | | array of commands |
 
 An update is `{"update_id": n, "message": {"message_id","chat":{"id"},"date","text"}}` (someone
-wrote; the first one of a chat is `/start`) or
-`{"update_id": n, "chat_stopped": {"chat":{"id"},"date"}}`. `getUpdates` returns updates with
+wrote; the first one of a chat is `/start`),
+`{"update_id": n, "callback_query": {"chat":{"id"},"message_id","data","date"}}` (someone pressed
+a button of that message) or `{"update_id": n, "chat_stopped": {"chat":{"id"},"date"}}`. `getUpdates` returns updates with
 `update_id >= offset` and deletes those below it, so a script passes the last id it handled
 plus one; with `timeout` the call waits for an update instead of answering with an empty
 array. Uncollected updates are dropped after 48 hours, and beyond 10 000 per bot.
+
+**Buttons.** `buttons` is an array of rows, each an array of `{"text", "data"}` or
+`{"text", "url"}`: at most 8 rows of 4, text ≤ 40 characters, `data` ≤ 64 bytes, `url` an
+`https://` address. A `data` button comes back as a `callback_query`; a `url` button opens the
+link, after the app shows the address. Telegram's `reply_markup: {"inline_keyboard": [[{"text",
+"callback_data" | "url"}]]}` is accepted as well.
+
+**Pictures.** `sendPhoto` takes a JPEG, PNG, GIF or WebP of at most 10 MiB, recognized by its
+content, either as the request body (`Content-Type: image/…`, other parameters in the query
+string) or as base64 in the JSON field `photo`:
+
+```
+curl "https://chat.example.org/bot/$TOKEN/sendPhoto?chat_id=$CHAT&caption=Front%20door" \
+  -H "Content-Type: image/jpeg" --data-binary @door.jpg
+```
+
+It counts toward the daily upload quota of the bot's owner and is deleted with the other
+message attachments.
 
 `sendMessage`: `400` with `"reason": "chat_not_found"` for a chat id that is not this bot's,
 `403` with `"reason": "bot_stopped"` after a stop. Limits: 30 messages per second per bot and

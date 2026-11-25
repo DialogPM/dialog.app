@@ -119,6 +119,41 @@ void main() {
     expect(sent.single['conversation_id'], 'c1');
   });
 
+  testWidgets('buttons under a bot message tell the bot or ask before opening a link', (tester) async {
+    final calls = <(String, Map<String, dynamic>?)>[];
+    container = ProviderContainer();
+    backend = Backend((cmd, req) async {
+      calls.add((cmd, jsonDecode(req) as Map<String, dynamic>?));
+      return 'null';
+    }, const Stream.empty());
+    final m = Message.fromJson({
+      'id': 'm1', 'conversation_id': 'c1', 'sender_account_id': 'b1', 'sender_name': 'Weather', 'outgoing': false, 'kind': 'text',
+      'text': 'Motion at the door', 'status': 'read', 'sent_at': 1, 'received_at': 1, 'deleted': false, 'forwarded': false,
+      'buttons': [
+        [
+          {'text': 'Ignore', 'data': 'ignore:7'},
+          {'text': 'Live', 'url': 'https://example.org/cam'},
+        ],
+        [
+          {'text': 'broken'},
+        ],
+      ],
+    });
+    expect(m.buttons.length, 1, reason: 'a button with neither data nor a link is not shown');
+    await tester.pumpWidget(_app(Scaffold(body: Center(child: SizedBox(width: 300, child: BotButtons(message: m))))));
+    await tester.tap(find.text('Ignore'));
+    await tester.pump();
+    expect(calls.single.$1, 'bot_press');
+    expect(calls.single.$2, {'message_id': 'm1', 'data': 'ignore:7'});
+    await tester.pump(const Duration(seconds: 2));
+    await tester.tap(find.text('Live'));
+    await tester.pumpAndSettle();
+    expect(find.text('https://example.org/cam'), findsOneWidget, reason: 'the address is shown before anything opens');
+    expect(calls.length, 1);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('a stopped or deleted bot says so', (tester) async {
     container = ProviderContainer();
     backend = Backend((cmd, req) async => 'null', const Stream.empty());

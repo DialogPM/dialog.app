@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../bots/bot_widgets.dart';
 import '../../app/globals.dart';
 import '../../core/models.dart';
 import '../../l10n/i18n.dart';
@@ -373,6 +374,7 @@ class MessageRow extends ConsumerWidget {
           ),
         ));
       }
+      if (m.buttons.isNotEmpty) children.add(BotButtons(message: m, enabled: !selecting));
     }
 
     Widget bubble = Container(

@@ -629,3 +629,57 @@ async fn the_operator_removes_a_username_from_an_account() {
     assert_eq!(username(&alice).await, Some(format!("{name}_ok")));
     admin("POST", "/v1/admin/usernames/unblock", Some(json!({ "pattern": name }))).await;
 }
+
+/// One Bot API call: (HTTP status, body).
+async fn bot_api(token: &str, method: &str, params: Value) -> (u16, Value) {
+    let resp = reqwest::Client::new().post(format!("{}/bot/{token}/{method}", server())).json(&params).send().await.unwrap();
+    let status = resp.status().as_u16();
+    (status, resp.json().await.unwrap_or(Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_operator_switches_a_bot_off_and_deletes_it() {
+    if skip() {
+        return;
+    }
+    let owner = Client::new("owner");
+    let user = Client::new("user");
+    let accounts = register(&[&owner, &user]).await;
+    let username = format!("op{}_bot", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    let name = username.clone();
+    let created = owner.core.run(move |i| async move { i.bot_create(&name, "Spammer", "").await }).await.unwrap();
+    let (bot, token) = (created.bot.id.clone(), created.token.clone());
+    let id = bot.clone();
+    user.core.run(move |i| async move { i.bot_start(&id).await }).await.unwrap();
+
+    // The operator finds it by name, with its owner and how many people started it.
+    let list = admin("GET", &format!("/v1/admin/bots?q={username}"), None).await;
+    assert_eq!(list["total"], 1);
+    let item = &list["items"][0];
+    assert_eq!(item["id"], bot.as_str());
+    assert_eq!(item["owner_account_id"], accounts[0].account_id.as_str());
+    assert_eq!(item["owner_number"], accounts[0].number.as_str());
+    assert_eq!((item["subscribers"].as_i64(), item["disabled_at"].is_null()), (Some(1), true));
+    assert!(item.get("token").is_none() && item.get("token_hash").is_none());
+
+    // Off: the token is refused and nobody can start the bot; it still exists.
+    admin("POST", &format!("/v1/admin/bots/{bot}/disable"), Some(json!({}))).await;
+    let (status, body) = bot_api(&token, "getMe", json!({})).await;
+    assert_eq!((status, body["reason"].as_str()), (403, Some("bot_disabled")), "{body}");
+    let id = bot.clone();
+    assert!(user.core.run(move |i| async move { i.bot_start(&id).await }).await.is_err());
+    let list = admin("GET", &format!("/v1/admin/bots?q={username}"), None).await;
+    assert!(list["items"][0]["disabled_at"].as_i64().is_some());
+
+    // On again: the same token works.
+    admin("POST", &format!("/v1/admin/bots/{bot}/enable"), Some(json!({}))).await;
+    assert_eq!(bot_api(&token, "getMe", json!({})).await.0, 200);
+
+    // Deleted: gone for its owner too, and its name is free.
+    admin("POST", &format!("/v1/admin/bots/{bot}/delete"), Some(json!({}))).await;
+    assert_eq!(bot_api(&token, "getMe", json!({})).await.0, 401);
+    assert!(owner.core.run(|i| async move { i.bots_list().await }).await.unwrap().is_empty());
+    assert_eq!(admin("GET", &format!("/v1/admin/bots?q={username}"), None).await["total"], 0);
+    let name = username.clone();
+    owner.core.run(move |i| async move { i.bot_create(&name, "Again", "").await }).await.unwrap();
+}
