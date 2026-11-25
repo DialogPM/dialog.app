@@ -783,6 +783,25 @@ class Backend {
   Future<bool> getTemporaryMode() async => await call('get_temporary_mode', null) == true;
   Future<void> setTemporaryMode(bool enabled) => call('set_temporary_mode', {'enabled': enabled});
 
+  // --- bots (not end-to-end encrypted; see BotInfo) ---------------------------
+  Future<BotInfo> botFind(String username) async => BotInfo.fromJson(await _obj('bot_find', {'username': username}));
+  Future<Conversation> botOpen(String botId) async => Conversation.fromJson(await _obj('bot_open', {'bot_id': botId}));
+  Future<Conversation> botStart(String botId) async => Conversation.fromJson(await _obj('bot_start', {'bot_id': botId}));
+  Future<Conversation> botStop(String botId) async => Conversation.fromJson(await _obj('bot_stop', {'bot_id': botId}));
+  Future<List<OwnedBot>> botsList() async => (await _list('bots_list')).map(OwnedBot.fromJson).toList();
+
+  /// The new bot with its token (shown once).
+  Future<OwnedBot> botCreate({required String username, required String name, String about = ''}) async {
+    final j = await _obj('bot_create', {'username': username, 'name': name, 'about': about});
+    return OwnedBot.fromJson(Json.from(j['bot'] as Map)).withToken(j['token'] as String?);
+  }
+
+  Future<String> botResetToken(String botId) async => (await call('bot_reset_token', {'bot_id': botId})) as String;
+  Future<void> botDelete(String botId) => call('bot_delete', {'bot_id': botId});
+  Future<List<BotSubscriber>> botSubscribers(String botId) async =>
+      (await _list('bot_subscribers', {'bot_id': botId})).map(BotSubscriber.fromJson).toList();
+  Future<void> botSendTest(String botId, String chatId, String text) => call('bot_send_test', {'bot_id': botId, 'chat_id': chatId, 'text': text});
+
   // --- messages ---------------------------------------------------------------
   /// Newest first when [before] is omitted; returns up to [limit] messages older than [before].
   Future<List<Message>> getMessages(String conversationId, {int? before, int? limit}) async =>

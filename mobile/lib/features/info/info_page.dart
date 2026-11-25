@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../bots/bot_widgets.dart';
 import '../../services/media.dart';
 import '../../app/globals.dart';
 import '../../app/nav.dart';
@@ -38,6 +39,7 @@ class InfoPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final conv = ref.watch(storeProvider.select((s) => s.conversations[conversationId]));
     if (conv == null) return Scaffold(backgroundColor: context.tk.pane);
+    if (conv.bot != null) return BotInfoPage(conv: conv, bot: conv.bot!);
     return PaneScaffold(
       header: PaneHeader(
         titleWidget: Text(context.t(conv.isGroup ? 'group.info' : 'contact.info'), style: ts(16.5, weight: 700, color: context.tk.ink)),

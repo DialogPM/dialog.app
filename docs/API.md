@@ -363,7 +363,8 @@ or `404` if never set.
 ## 7. Messages
 
 Envelope types (libsignal `CiphertextMessageType`): `2` = Whisper (SignalMessage),
-`3` = PreKey (PreKeySignalMessage), `7` = SenderKey (group), `8` = Plaintext.
+`3` = PreKey (PreKeySignalMessage), `7` = SenderKey (group), `8` = Plaintext. `9` = a bot's message
+(section 22), created only by the server.
 
 ### Send 1:1 (fan-out to all devices of an account)
 
@@ -1026,3 +1027,116 @@ or its own account id. A new notice is announced to connected devices with the W
 event `{"kind":"operator_notice","id":n}`; there is no push notification. Notices are plain
 text (title ≤ 120 characters, body ≤ 2000).
 
+
+## 22. Bots (server-rs only)
+
+A bot is a program run by its owner, anywhere, that talks to people through this server: it
+can notify them (a build finished, a sensor tripped) and answer the commands they send it.
+
+**Not end-to-end encrypted.** A bot has no keys. Its script hands the server plain text over
+HTTPS, and what people write to a bot is kept as text until the script collects it. The
+server operator can therefore read bot conversations, unlike every other conversation. Apps
+say so in each bot conversation.
+
+**No spam.** A bot can write only to a chat its user started and has not stopped. It has no
+way to name anyone: the only handle it ever sees is the chat id of someone who started it.
+
+**No identity.** The chat id is random and different for every bot. A bot never sees an
+account id, number, username, name, profile or presence, so two bots cannot tell they talk to
+the same person.
+
+### Owning a bot
+
+`POST /v1/bots` (auth)
+
+```json
+{ "username": "weather_bot", "name": "Weather", "about": "Rain alerts" }
+```
+
+→ `{"bot": {…}, "token": "<43 characters>"}`. The token is returned once: only its hash is
+stored. `username`: the characters of an account username, at least 5 of them, ending in `bot`; it shares
+the namespace of account usernames. `name` ≤ 64 characters, `about` ≤ 512.
+`409` with `"reason": "username_taken"` or `"too_many_bots"` (20 per account).
+
+`GET /v1/bots` (auth) → `{"bots": [{"id","username","name","about","commands","created_at","disabled","subscribers"}]}`
+(`subscribers`: started and not stopped).
+
+`PATCH /v1/bots/{id}` (auth, owner) `{"name"?, "about"?, "commands"?}` → the bot.
+`commands`: at most 50 of `{"command","description"}`; a command is 1–32 characters `a-z 0-9 _`
+starting with a letter, a description ≤ 256 characters.
+
+`POST /v1/bots/{id}/token` (auth, owner) → `{"token"}`; the previous token stops working.
+
+`GET /v1/bots/{id}/subscribers` (auth, owner) → `{"subscribers": [{"chat_id","since","mine"}]}`:
+the chats the bot may write to, newest first (at most 1000). The owner sees chat ids only,
+like the bot; `mine` marks the owner's own chat.
+
+`POST /v1/bots/{id}/send` (auth, owner) `{"chat_id","text"}`: `sendMessage` of the Bot API
+without the token (the apps' test message).
+
+`DELETE /v1/bots/{id}` (auth, owner) → 204. Chats and pending updates go with it; the people
+who had started it get the WebSocket event `{"kind":"bot_deleted","bot_id"}`.
+
+Someone else's bot answers `404` on the owner endpoints.
+
+### Talking to a bot
+
+`GET /v1/bots/{id}` and `GET /v1/bots/username/{username}` (auth) →
+`{"id","username","name","about","commands","state","mine","disabled"}`; `state` is the
+caller's: `none`, `active` or `stopped`.
+
+`POST /v1/bots/{id}/start` (auth) → `{"state":"active"}`. Begins or resumes the chat; the bot
+receives the message `/start`.
+
+`POST /v1/bots/{id}/stop` (auth) → `{"state":"stopped"}`. The bot is told (`chat_stopped`) and
+its sends are refused from then on.
+
+`POST /v1/bots/{id}/messages` (auth) `{"id"?: uuid, "text"}` → `{"server_timestamp"}`. Text of
+at most 4096 characters, only in an `active` chat (`403`, `"reason": "bot_not_started"`). A
+repeated `id` is stored once.
+
+`GET /v1/bot-chats` (auth) → `{"chats": [{"bot": {…}, "state"}]}`: every bot the account ever
+started (a new device restores its bot conversations from it).
+
+The account's other devices learn of a start or stop from the WebSocket event
+`{"kind":"bot_chat","bot_id","state"}`.
+
+A bot's message reaches each device of the account as an envelope of **type 9** with
+`source_account` = the bot's id, `source_device` = 0 and the content (base64 of JSON)
+
+```json
+{ "id": "<uuid>", "text": "Rain at 5 pm", "sent_at": 1730000000000, "silent": true }
+```
+
+(`silent` only when set). Clients accept type 9 only from an id the server describes as a bot
+(`GET /v1/bots/{id}`); the server refuses type 9 from clients.
+
+### Bot API
+
+For the bot's script. Modelled on Telegram's: `GET` or `POST /bot/<token>/<method>`, parameters
+in the query string or a JSON object body, success as `{"ok": true, "result": …}`, failure
+as the usual error body (`{"error","message"}`, here often with a `reason`). Method names are
+not case sensitive. `401` for a token that is not a bot's.
+
+```
+curl https://chat.example.org/bot/$TOKEN/sendMessage -d chat_id=$CHAT --data-urlencode "text=Backup finished"
+```
+
+| Method | Parameters | Result |
+|---|---|---|
+| `getMe` | | `{"id","username","name","about","commands"}` |
+| `getUpdates` | `offset`, `limit` (1–100), `timeout` (seconds, ≤ 50) | array of updates |
+| `sendMessage` | `chat_id`, `text` (≤ 4096 characters), `silent` (or `disable_notification`) | `{"message_id","date","chat":{"id"}}` |
+| `setMyCommands` | `commands`: array of `{"command","description"}` | `true` |
+| `getMyCommands` | | array of commands |
+
+An update is `{"update_id": n, "message": {"message_id","chat":{"id"},"date","text"}}` (someone
+wrote; the first one of a chat is `/start`) or
+`{"update_id": n, "chat_stopped": {"chat":{"id"},"date"}}`. `getUpdates` returns updates with
+`update_id >= offset` and deletes those below it, so a script passes the last id it handled
+plus one; with `timeout` the call waits for an update instead of answering with an empty
+array. Uncollected updates are dropped after 48 hours, and beyond 10 000 per bot.
+
+`sendMessage`: `400` with `"reason": "chat_not_found"` for a chat id that is not this bot's,
+`403` with `"reason": "bot_stopped"` after a stop. Limits: 30 messages per second per bot and
+60 per minute per chat (`429`).

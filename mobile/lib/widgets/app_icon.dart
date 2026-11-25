@@ -8,6 +8,7 @@ import 'package:path_parsing/path_parsing.dart';
 
 const Map<String, List<String>> kIconPaths = {
   'search': ['M11 4a7 7 0 1 0 0 14a7 7 0 0 0 0-14z', 'M20 20l-3.5-3.5'],
+  'bot': ['M5 8h14v11H5z', 'M12 4v4', '*M9.5 13h0', '*M14.5 13h0', 'M2 12v3', 'M22 12v3'],
   'edit': ['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'],
   'more': ['*M12 5h0', '*M12 12h0', '*M12 19h0'],
   'back': ['M19 12H5', 'M12 19l-7-7 7-7'],

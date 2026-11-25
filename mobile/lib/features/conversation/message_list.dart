@@ -204,7 +204,10 @@ class _MessageListState extends ConsumerState<MessageList> {
             case _E2eRow():
               return Padding(
                 padding: const EdgeInsets.only(top: 10, bottom: 6),
-                child: SysNote(icon: 'lock', text: context.t('chat.e2eNotice')),
+                // A bot conversation is the one kind that is not end-to-end encrypted.
+                child: appData.conversations[id]?.bot != null
+                    ? SysNote(icon: 'info', text: context.t('bots.notice'))
+                    : SysNote(icon: 'lock', text: context.t('chat.e2eNotice')),
               );
             case _DayRow(ts: final dayTs):
               return Padding(

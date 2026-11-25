@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../bots/bot_widgets.dart';
 import '../../app/globals.dart';
 import '../../app/nav.dart';
 import '../../core/models.dart';
@@ -114,11 +115,16 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
             if (!selecting && !_searching && conv.isGroup && !conv.left) JoinRequestsBanner(conversationId: conv.id),
             Expanded(
               child: Stack(children: [
-                Positioned.fill(child: MessageList(conversationId: id, group: conv.isGroup)),
+                if (conv.bot != null && conv.bot!.state == 'none' && !conv.bot!.deleted)
+                  Positioned.fill(child: BotLanding(conv: conv, bot: conv.bot!))
+                else
+                  Positioned.fill(child: MessageList(conversationId: id, group: conv.isGroup)),
                 if (_searching) Positioned.fill(child: _ChatSearchResults(conv: conv, onPick: () => setState(() => _searching = false))),
               ]),
             ),
-            if (block != null)
+            if (conv.bot != null && block == null)
+              BotFooter(key: ValueKey('bot-${conv.id}'), conv: conv, bot: conv.bot!)
+            else if (block != null)
               _BlockedNotice(conv: conv, reason: block)
             // Message request / group invite from a stranger: accept (or not) before writing.
             else if (conv.isRequest)
@@ -252,12 +258,13 @@ class _ChatHeader extends ConsumerWidget {
               behavior: HitTestBehavior.opaque,
               onTap: () => openInfo(conv.id),
               child: Row(children: [
-                Avatar(name: conv.title, path: conv.avatarPath, seed: conv.id, size: 42, group: conv.isGroup),
+                Avatar(name: conv.title, path: conv.avatarPath, seed: conv.id, size: 42, group: conv.isGroup, bot: conv.bot != null),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
                     Row(children: [
                       Flexible(child: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(16, weight: 700, color: t.ink))),
+                      if (conv.bot != null) ...[const SizedBox(width: 6), const BotBadge(small: true)],
                       OfficialBadge(official, size: 16),
                       if (verified) ...[const SizedBox(width: 6), AppIcon('shield', size: 15, color: t.accentText)],
                       if (conv.disappearingSeconds > 0) ...[
@@ -278,7 +285,10 @@ class _ChatHeader extends ConsumerWidget {
                         ),
                       ],
                     ]),
-                    Text(sub.text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: sub.accent ? t.accentText : t.muted)),
+                    if (conv.bot != null)
+                      Text('@${conv.bot!.username}', maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12, color: t.muted, mono: true))
+                    else
+                      Text(sub.text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: sub.accent ? t.accentText : t.muted)),
                   ]),
                 ),
               ]),
@@ -289,7 +299,7 @@ class _ChatHeader extends ConsumerWidget {
           IconBtn('video', color: t.muted, iconSize: 21, tooltip: context.t('groupCall.startVideo'), onPressed: () => unawaited(startGroupCall(conv.id, video: true))),
           IconBtn('phone', color: t.muted, tooltip: context.t('groupCall.start'), onPressed: () => unawaited(startGroupCall(conv.id))),
         ],
-        if (!conv.isGroup && conv.peerAccountId != null && !blocked) ...[
+        if (!conv.isGroup && conv.peerAccountId != null && !blocked && conv.bot == null) ...[
           IconBtn('video', color: t.muted, iconSize: 21, tooltip: context.t('call.startVideo'), onPressed: () => unawaited(startCall(conv.id, video: true))),
           IconBtn('phone', color: t.muted, tooltip: context.t('call.start'), onPressed: () => unawaited(startCall(conv.id))),
         ],

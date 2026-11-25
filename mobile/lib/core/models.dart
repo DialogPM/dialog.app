@@ -290,6 +290,9 @@ class Conversation {
   /// for groups.
   final String? official;
 
+  /// Direct chats whose peer is a bot (not end-to-end encrypted, text only); null otherwise.
+  final BotInfo? bot;
+
   const Conversation({
     required this.id,
     required this.kind,
@@ -314,6 +317,7 @@ class Conversation {
     this.accepted = true,
     this.peerIsContact = false,
     this.official,
+    this.bot,
   });
 
   bool get isGroup => kind == 'group';
@@ -356,6 +360,7 @@ class Conversation {
         peerIsContact: _bool(j['peer_is_contact']),
         // A group never carries a badge, whatever the payload says.
         official: _str(j['kind']) == 'group' ? null : _official(j['official']),
+        bot: _map(j['bot']) == null ? null : BotInfo.fromJson(_map(j['bot'])!),
       );
 }
 
@@ -1396,4 +1401,85 @@ class KtContactStatus {
         treeSize: _intOrNull(j['tree_size']),
         checkedAt: _intOrNull(j['checked_at']),
       );
+}
+
+/// A command a bot offers after "/".
+class BotCommand {
+  final String command;
+  final String description;
+  const BotCommand(this.command, this.description);
+  factory BotCommand.fromJson(Json j) => BotCommand(_str(j['command']) ?? '', _str(j['description']) ?? '');
+}
+
+List<BotCommand> _botCommands(Object? v) =>
+    v is List ? v.whereType<Map>().map((m) => BotCommand.fromJson(Json.from(m))).where((c) => c.command.isNotEmpty).toList() : const [];
+
+/// A bot as seen by someone talking to it. Bot conversations are not end-to-end encrypted and
+/// carry text only; the bot may write to us only while [state] is "active".
+class BotInfo {
+  final String id;
+  final String username;
+  final String name;
+  final String about;
+  final List<BotCommand> commands;
+
+  /// "none" (never started), "active" or "stopped".
+  final String state;
+
+  /// One of our own bots.
+  final bool mine;
+
+  /// Its owner deleted it.
+  final bool deleted;
+
+  const BotInfo({required this.id, required this.username, required this.name, this.about = '', this.commands = const [], this.state = 'none', this.mine = false, this.deleted = false});
+
+  bool get active => state == 'active' && !deleted;
+
+  factory BotInfo.fromJson(Json j) => BotInfo(
+        id: _str(j['id']) ?? '',
+        username: _str(j['username']) ?? '',
+        name: _str(j['name']) ?? '',
+        about: _str(j['about']) ?? '',
+        commands: _botCommands(j['commands']),
+        state: _str(j['state']) ?? 'none',
+        mine: _bool(j['mine']),
+        deleted: _bool(j['deleted']),
+      );
+}
+
+/// One of the bots this account created.
+class OwnedBot {
+  final String id;
+  final String username;
+  final String name;
+  final String about;
+  final int subscribers;
+
+  /// The token, when this device created or reset it (the server keeps only a hash).
+  final String? token;
+
+  const OwnedBot({required this.id, required this.username, required this.name, this.about = '', this.subscribers = 0, this.token});
+
+  OwnedBot withToken(String? t) => OwnedBot(id: id, username: username, name: name, about: about, subscribers: subscribers, token: t);
+  OwnedBot withSubscribers(int n) => OwnedBot(id: id, username: username, name: name, about: about, subscribers: n, token: token);
+
+  factory OwnedBot.fromJson(Json j) => OwnedBot(
+        id: _str(j['id']) ?? '',
+        username: _str(j['username']) ?? '',
+        name: _str(j['name']) ?? '',
+        about: _str(j['about']) ?? '',
+        subscribers: _intOrNull(j['subscribers']) ?? 0,
+        token: _str(j['token']),
+      );
+}
+
+/// A chat one of our bots may write to: a chat id, nobody's identity.
+class BotSubscriber {
+  final String chatId;
+  final int since;
+  final bool mine;
+  const BotSubscriber({required this.chatId, required this.since, this.mine = false});
+  factory BotSubscriber.fromJson(Json j) =>
+      BotSubscriber(chatId: _str(j['chat_id']) ?? '', since: _intOrNull(j['since']) ?? 0, mine: _bool(j['mine']));
 }

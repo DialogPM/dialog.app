@@ -57,6 +57,10 @@ impl Inner {
         if env.source_account != me && self.is_blocked(&env.source_account) {
             return Ok(());
         }
+        if env.kind == super::bots::BOT_ENVELOPE {
+            // A bot's message: text from the server, not encrypted (engine/bots.rs).
+            return self.handle_bot_envelope(&env.source_account, &bytes).await;
+        }
         let device = DeviceId::new(env.source_device as u8).map_err(|_| CoreError::internal("bad source device"))?;
         let sender = ProtocolAddress::new(env.source_account.clone(), device);
         let local = s.local_address();
@@ -448,7 +452,7 @@ impl Inner {
     }
 
     /// Applies a data message to a conversation (new message or modification).
-    fn apply_data(self: &Rc<Self>, conv_id: &str, sender: &str, device: u32, mut dm: DataMessage, outgoing: bool) -> Result<()> {
+    pub(super) fn apply_data(self: &Rc<Self>, conv_id: &str, sender: &str, device: u32, mut dm: DataMessage, outgoing: bool) -> Result<()> {
         let now = now_ms();
         // Senders choose `sent_at`; never let it lie far in the future (list ordering).
         dm.sent_at = dm.sent_at.min(now + 5 * 60_000);

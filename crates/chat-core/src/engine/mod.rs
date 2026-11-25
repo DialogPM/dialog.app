@@ -8,6 +8,7 @@
 mod account;
 mod attachments;
 mod attest;
+mod bots;
 mod call_checks;
 mod call_settings;
 mod calls;

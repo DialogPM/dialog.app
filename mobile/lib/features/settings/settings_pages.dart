@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import '../bots/bots_page.dart';
 import '../../services/user_links.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +50,7 @@ class SettingsSectionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (section == 'bots') return const BotsPage();
     final Widget body = switch (section) {
       'profile' => const _ProfileSection(),
       'account' => const _AccountSection(),

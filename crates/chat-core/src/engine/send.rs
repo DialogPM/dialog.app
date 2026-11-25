@@ -481,6 +481,10 @@ impl Inner {
     /// Encrypts `content` for every device of `account_id` and sends it.
     /// For our own account, it goes to our other devices only.
     pub async fn send_to_account(&self, account_id: &str, content: &Content, online: bool) -> Result<()> {
+        if self.is_bot(account_id) {
+            // No keys, no devices: text goes through the server (engine/bots.rs).
+            return self.send_to_bot(account_id, content).await;
+        }
         let _guard = self.send_lock.lock().await;
         let s = self.session()?;
         let is_self = account_id == s.account.account_id;

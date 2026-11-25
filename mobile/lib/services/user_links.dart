@@ -11,6 +11,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../features/bots/bot_widgets.dart';
 import '../app/globals.dart';
 import '../app/nav.dart';
 import '../core/models.dart';
@@ -115,7 +116,18 @@ class UserLinks {
       return;
     }
     if (found == null) {
-      showToast(tr('userLink.notFound', args: {'name': '@$name'}), error: true);
+      // Not a person: perhaps a bot. Opening it starts nothing: its page asks for "Start".
+      BotInfo? bot;
+      if (looksLikeBotName(name)) {
+        try {
+          bot = await backend.botFind(name);
+        } catch (_) {}
+      }
+      if (bot != null) {
+        await openBot(bot.id);
+      } else {
+        showToast(tr('userLink.notFound', args: {'name': '@$name'}), error: true);
+      }
       return;
     }
     if (found.isMe) {

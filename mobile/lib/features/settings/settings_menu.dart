@@ -26,6 +26,7 @@ const kSettingsSections = <(String key, String icon)>[
   ('notifications', 'bell'),
   ('devices', 'devices'),
   ('chats', 'chat'),
+  ('bots', 'bot'),
   ('appearance', 'palette'),
   ('language', 'lang'),
   ('about', 'info'),

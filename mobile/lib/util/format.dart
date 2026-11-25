@@ -278,6 +278,12 @@ String systemText(SystemEvent s, String lang) {
   final actor = you ? t('common.you') : s.actorName != null ? isolate(s.actorName!) : t('common.someone');
   final targets = _names(s.targetNames, lang);
   switch (s.type) {
+    case 'bot_started':
+      return t('system.botStarted');
+    case 'bot_restarted':
+      return t('system.botRestarted');
+    case 'bot_stopped':
+      return t('system.botStopped');
     case 'group_created':
       return t(you ? 'system.groupCreatedYou' : 'system.groupCreated', {'actor': actor, 'name': isolate(s.value ?? '')});
     case 'group_member_added':

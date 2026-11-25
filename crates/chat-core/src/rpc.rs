@@ -138,6 +138,34 @@ pub struct RenameContactReq {
     name: Option<String>,
 }
 #[derive(Deserialize)]
+pub struct BotIdReq {
+    bot_id: String,
+}
+#[derive(Deserialize)]
+pub struct BotTestReq {
+    bot_id: String,
+    chat_id: String,
+    text: String,
+}
+#[derive(Deserialize)]
+pub struct BotFindReq {
+    username: String,
+}
+#[derive(Deserialize)]
+pub struct BotCreateReq {
+    username: String,
+    name: String,
+    #[serde(default)]
+    about: String,
+}
+#[derive(Deserialize)]
+pub struct BotUpdateReq {
+    bot_id: String,
+    name: Option<String>,
+    about: Option<String>,
+    commands: Option<Vec<BotCommand>>,
+}
+#[derive(Deserialize)]
 pub struct BlockReq {
     account_id: String,
     blocked: bool,
@@ -419,6 +447,17 @@ rpc_table! {
     add_contact_by_number(req: AddByNumberReq) -> Contact => |i| i.add_contact_by_number(&req.number, req.name).await;
     rename_contact(req: RenameContactReq) -> Contact => |i| i.rename_contact(&req.account_id, req.name);
     set_blocked(req: BlockReq) -> Contact => |i| i.set_blocked(&req.account_id, req.blocked);
+    bot_find(req: BotFindReq) -> BotInfo => |i| i.bot_find(&req.username).await;
+    bot_open(req: BotIdReq) -> Conversation => |i| i.bot_open(&req.bot_id).await;
+    bot_start(req: BotIdReq) -> Conversation => |i| i.bot_start(&req.bot_id).await;
+    bot_stop(req: BotIdReq) -> Conversation => |i| i.bot_stop(&req.bot_id).await;
+    bots_list() -> Vec<OwnedBot> => |i| i.bots_list().await;
+    bot_create(req: BotCreateReq) -> BotCreated => |i| i.bot_create(&req.username, &req.name, &req.about).await;
+    bot_update(req: BotUpdateReq) -> OwnedBot => |i| i.bot_update(&req.bot_id, req.name, req.about, req.commands).await;
+    bot_reset_token(req: BotIdReq) -> String => |i| i.bot_reset_token(&req.bot_id).await;
+    bot_delete(req: BotIdReq) -> () => |i| i.bot_delete(&req.bot_id).await;
+    bot_subscribers(req: BotIdReq) -> Vec<BotSubscriber> => |i| i.bot_subscribers(&req.bot_id).await;
+    bot_send_test(req: BotTestReq) -> () => |i| i.bot_send_test(&req.bot_id, &req.chat_id, &req.text).await;
     import_contacts(req: PathReq) -> ContactImportResult => |i| i.import_contacts(&req.path).await;
     get_my_contact_link() -> String => |i| i.my_contact_link();
     add_contact_from_link(req: LinkReq) -> Contact => |i| i.add_contact_from_link(&req.link).await;

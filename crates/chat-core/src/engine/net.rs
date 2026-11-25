@@ -46,6 +46,10 @@ enum ServerEvent {
     AccountDeleted,
     /// The operator published a notice for us or for everyone (engine/operator.rs).
     OperatorNotice,
+    /// The chat with a bot was started or stopped on another of our devices (engine/bots.rs).
+    BotChat { bot_id: String, state: String },
+    /// A bot we talked to was deleted.
+    BotDeleted { bot_id: String },
     #[serde(other)]
     Unknown,
 }
@@ -301,6 +305,8 @@ impl Inner {
                     self.spawn_login_requests_refresh();
                     // Notices published while we were offline.
                     self.spawn_notices_fetch();
+                    // Bots started or stopped on our other devices meanwhile.
+                    self.spawn_bot_chats_sync();
                     let me = self.clone();
                     tokio::task::spawn_local(async move {
                         if let Err(e) = me.refresh_keys().await {
@@ -339,6 +345,8 @@ impl Inner {
                         });
                     }
                     ServerEvent::OperatorNotice => self.spawn_notices_fetch(),
+                    ServerEvent::BotChat { bot_id, state } => self.on_bot_chat_event(bot_id, state),
+                    ServerEvent::BotDeleted { bot_id } => self.on_bot_deleted_event(&bot_id),
                     ServerEvent::AccountDeleted => {
                         end = SocketEnd::AccountDeleted;
                         break;
@@ -376,7 +384,7 @@ impl Inner {
             .prepare("SELECT peer_account_id FROM conversations WHERE peer_account_id IS NOT NULL ORDER BY updated_at DESC LIMIT 900")
             .and_then(|mut st| st.query_map([], |r| r.get(0))?.collect())
             .unwrap_or_default();
-        let mut ids: Vec<String> = peers.into_iter().filter(|p| self.trusts_account(p)).collect();
+        let mut ids: Vec<String> = peers.into_iter().filter(|p| self.trusts_account(p) && !self.is_bot(p)).collect();
         for id in self.presence_watch.borrow().iter() {
             if !ids.contains(id) {
                 ids.push(id.clone());

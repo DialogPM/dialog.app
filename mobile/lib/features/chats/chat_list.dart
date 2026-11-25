@@ -1,5 +1,6 @@
 // Chat list: header, search (chats + messages), filter chips, rows (long press = menu).
 
+import '../bots/bot_widgets.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -411,7 +412,7 @@ class ChatListItem extends ConsumerWidget {
         padding: EdgeInsets.symmetric(horizontal: t.rowPx, vertical: 11),
         child: Row(children: [
           Stack(clipBehavior: Clip.none, children: [
-            Avatar(name: conv.title, path: conv.avatarPath, seed: conv.id, size: 50, group: conv.isGroup),
+            Avatar(name: conv.title, path: conv.avatarPath, seed: conv.id, size: 50, group: conv.isGroup, bot: conv.bot != null),
             // Disappearing messages on (like other messengers): visible before opening the chat.
             if (conv.disappearingSeconds > 0)
               Positioned(
@@ -435,6 +436,7 @@ class ChatListItem extends ConsumerWidget {
                 Expanded(
                   child: Row(children: [
                     Flexible(child: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(15.5, weight: 650, color: t.ink))),
+                    if (conv.bot != null) ...[const SizedBox(width: 6), const BotBadge(small: true)],
                     OfficialBadge(official, size: 15),
                     if (verified) ...[const SizedBox(width: 6), AppIcon('shield', size: 14, color: t.accentText, semanticLabel: context.t('safety.verified'))],
                   ]),
@@ -529,6 +531,9 @@ class _SearchResultsState extends ConsumerState<_SearchResults> {
   String _searched = '';
   FoundAccount? _found;
 
+  /// A bot with the searched username, when no account has it.
+  BotInfo? _bot;
+
   /// A 16-digit account number or a @username: worth asking the directory.
   static bool _isAccountQuery(String q) {
     final digits = q.replaceAll(RegExp(r'[\s-]'), '');
@@ -573,8 +578,21 @@ class _SearchResultsState extends ConsumerState<_SearchResults> {
         return;
       }
       if (_isAccountQuery(q)) {
-        backend.findAccount(q).then((f) {
-          if (mounted && widget.query == q) setState(() => _found = f);
+        backend.findAccount(q).then((f) async {
+          // No account has this name: it may be a bot's (their names end in "bot").
+          final name = q.trim().replaceFirst('@', '').toLowerCase();
+          BotInfo? bot;
+          if (f == null && looksLikeBotName(name)) {
+            try {
+              bot = await backend.botFind(name);
+            } catch (_) {}
+          }
+          if (mounted && widget.query == q) {
+            setState(() {
+              _found = f;
+              _bot = bot;
+            });
+          }
         }).catchError((Object _) {
           if (mounted) setState(() => _found = null);
         });
@@ -603,6 +621,9 @@ class _SearchResultsState extends ConsumerState<_SearchResults> {
       if (found != null) ...[
         SectionLabel(context.t('mobile.searchAccount')),
         _FoundAccountRow(found: found),
+      ] else if (_bot != null && _isAccountQuery(widget.query)) ...[
+        SectionLabel(context.t('mobile.searchAccount')),
+        BotFoundRow(bot: _bot!),
       ],
       if (widget.conversations.isNotEmpty) SectionLabel(context.t('chats.searchChats')),
       for (final c in widget.conversations) ChatListItem(conv: c),

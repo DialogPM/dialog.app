@@ -27,13 +27,16 @@ const Map<int, double> _avatarFont = {22: 9, 28: 11, 36: 12.5, 38: 13, 40: 13.5,
 
 /// Round avatar: photo when available, otherwise initials on an oklch tint derived from the id.
 class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.name, this.path, this.seed, this.size = 44, this.group = false});
+  const Avatar({super.key, required this.name, this.path, this.seed, this.size = 44, this.group = false, this.bot = false});
 
   final String name;
   final String? path;
   final String? seed;
   final double size;
   final bool group;
+
+  /// A bot: its sign instead of a letter or photo.
+  final bool bot;
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +45,9 @@ class Avatar extends StatelessWidget {
     final text = initials(name);
     final p = path;
     Widget child;
-    if (p != null && p.isNotEmpty && File(p).existsSync()) {
+    if (bot) {
+      child = Center(child: AppIcon('bot', size: (size * 0.47).roundToDouble(), color: colors.fg));
+    } else if (p != null && p.isNotEmpty && File(p).existsSync()) {
       child = MediaImage(p, width: size, height: size, fit: BoxFit.cover, cacheWidth: (size * 3).round());
     } else if (group && (text == '?' || text == '#' || text.trim().isEmpty)) {
       child = Center(child: AppIcon('users', size: (size * 0.45).roundToDouble(), color: colors.fg));

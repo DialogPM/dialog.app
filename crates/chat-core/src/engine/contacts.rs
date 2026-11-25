@@ -36,7 +36,7 @@ impl Inner {
             .conn
             .query_row("SELECT number FROM contacts WHERE account_id = ?1", [account_id], |r| r.get(0))
             .optional()?;
-        if matches!(&number, Some(n) if !n.is_empty()) {
+        if matches!(&number, Some(n) if !n.is_empty()) || self.is_bot(account_id) {
             return Ok(());
         }
         let entry: Result<DirectoryEntryDto> =
@@ -60,6 +60,13 @@ impl Inner {
                     "INSERT OR IGNORE INTO contacts (account_id, number, updated_at) VALUES (?1, '', 0)",
                     [account_id],
                 )?;
+            }
+            // Not an account: a bot we have not met on this device (a conversation restored
+            // from the vault, before the list of our bots arrived).
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => {
+                if !self.fetch_bot(account_id).await.unwrap_or(false) {
+                    return Err(e);
+                }
             }
             Err(e) => return Err(e),
         }

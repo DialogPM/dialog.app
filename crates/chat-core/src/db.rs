@@ -264,6 +264,22 @@ CREATE TABLE notices (
     received_at INTEGER NOT NULL,
     read        INTEGER NOT NULL DEFAULT 0
 );
+"#, r#"
+-- 18: bots (engine/bots.rs). A bot is the peer of a direct conversation; this row marks it
+-- as one and keeps what the server says about it. state: 'none' | 'active' | 'stopped'
+-- (whether the bot may write to us; the server enforces it). Derived from the server: never
+-- in the vault.
+CREATE TABLE bots (
+    account_id    TEXT PRIMARY KEY,
+    username      TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    about         TEXT NOT NULL DEFAULT '',
+    commands_json TEXT NOT NULL DEFAULT '[]',
+    state         TEXT NOT NULL DEFAULT 'none',
+    mine          INTEGER NOT NULL DEFAULT 0,
+    deleted       INTEGER NOT NULL DEFAULT 0,
+    fetched_at    INTEGER NOT NULL DEFAULT 0
+);
 "#];
 
 pub struct Db {

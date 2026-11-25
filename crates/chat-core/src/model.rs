@@ -138,6 +138,74 @@ pub struct Conversation {
     /// Direct chats: the peer's verified official badge label (engine/operator.rs). None for
     /// groups.
     pub official: Option<String>,
+    /// Direct chats whose peer is a bot (engine/bots.rs): not end-to-end encrypted, text only.
+    pub bot: Option<BotInfo>,
+}
+
+/// A command a bot offers after "/".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BotCommand {
+    pub command: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// A bot as seen by someone talking to it.
+#[derive(Debug, Clone, Serialize)]
+pub struct BotInfo {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    pub about: String,
+    pub commands: Vec<BotCommand>,
+    /// "none" (never started), "active" (it may write to us) or "stopped".
+    pub state: String,
+    /// One of our own bots.
+    pub mine: bool,
+    /// Its owner deleted it.
+    pub deleted: bool,
+}
+
+/// One of the bots this account created.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnedBot {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    #[serde(default)]
+    pub about: String,
+    #[serde(default)]
+    pub commands: Vec<BotCommand>,
+    #[serde(default)]
+    pub created_at: i64,
+    /// Disabled by the operator.
+    #[serde(default)]
+    pub disabled: bool,
+    /// People who started it and have not stopped it.
+    #[serde(default)]
+    pub subscribers: i64,
+    /// The bot's token, when this device created or reset it (the server keeps only a hash,
+    /// so no other device can show it).
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+/// A chat one of our bots may write to. The owner knows it by chat id only, like the bot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotSubscriber {
+    pub chat_id: String,
+    /// When the chat was started (ms).
+    pub since: i64,
+    /// Our own chat with the bot.
+    #[serde(default)]
+    pub mine: bool,
+}
+
+/// A new bot with its token, which is shown once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCreated {
+    pub bot: OwnedBot,
+    pub token: String,
 }
 
 /// Attachment as stored locally (superset of the UI type; keys are never sent to the UI).

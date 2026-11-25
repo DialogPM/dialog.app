@@ -633,6 +633,10 @@ impl Inner {
         if text.is_none() && req.attachments.is_empty() && req.location.is_none() && contacts.is_empty() {
             return Err(CoreError::invalid("empty message"));
         }
+        if let Some(peer) = &conv.peer_account_id {
+            let text_only = req.attachments.is_empty() && req.location.is_none() && contacts.is_empty() && !req.view_once;
+            self.check_can_send_to_bot(peer, text_only)?;
+        }
         if req.view_once
             && !super::view_once::valid_view_once_shape(
                 text.is_some() || req.location.is_some() || !contacts.is_empty(),
