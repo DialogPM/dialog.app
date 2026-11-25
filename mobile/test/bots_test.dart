@@ -74,7 +74,24 @@ void main() {
     expect(appData.conversations['c1']!.bot!.state, 'active');
   });
 
-  testWidgets('a started bot without commands can be muted or stopped', (tester) async {
+  testWidgets('a started bot without commands can still be written to', (tester) async {
+    final sent = <Map<String, dynamic>>[];
+    container = ProviderContainer();
+    backend = Backend((cmd, req) async {
+      if (cmd == 'send_message') sent.add(jsonDecode(req) as Map<String, dynamic>);
+      return 'null';
+    }, const Stream.empty());
+    await tester.pumpWidget(_app(_chat(Conversation.fromJson(_conv('active')))));
+    expect(find.text('/'), findsNothing, reason: 'no commands, no commands button');
+    await tester.enterText(find.byKey(const ValueKey('bot-input')), 'hello');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('bot-send')));
+    await tester.pump();
+    expect(sent.single['text'], 'hello');
+    expect(sent.single['conversation_id'], 'c1');
+  });
+
+  testWidgets('a started bot can be muted or stopped from its info page', (tester) async {
     final calls = <String>[];
     container = ProviderContainer();
     backend = Backend((cmd, req) async {
@@ -82,10 +99,10 @@ void main() {
       if (cmd == 'bot_stop') return jsonEncode(_conv('stopped'));
       return 'null';
     }, const Stream.empty());
-    await tester.pumpWidget(_app(_chat(Conversation.fromJson(_conv('active')))));
+    final c = Conversation.fromJson(_conv('active'));
+    await tester.pumpWidget(_app(BotInfoPage(conv: c, bot: c.bot!)));
     expect(find.text('Mute'), findsOneWidget);
-    expect(find.byKey(const ValueKey('bot-input')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('bot-stop')));
+    await tester.tap(find.text('Stop the bot'));
     await tester.pumpAndSettle();
     expect(calls, isEmpty, reason: 'stopping asks first');
     await tester.tap(find.text('Stop the bot').last);

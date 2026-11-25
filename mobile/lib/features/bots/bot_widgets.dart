@@ -143,7 +143,7 @@ class BotLanding extends StatelessWidget {
 
 const int _muteForever = -1;
 
-/// The bottom of a bot conversation: "Start", or Mute / Stop, or the commands composer.
+/// The bottom of a bot conversation: "Start", or the text composer (with the commands after "/").
 class BotFooter extends StatefulWidget {
   const BotFooter({super.key, required this.conv, required this.bot});
   final Conversation conv;
@@ -186,30 +186,10 @@ class _BotFooterState extends State<BotFooter> {
     unawaited(sendText(widget.conv.id, v));
   }
 
-  Widget _button(BuildContext context, {required String label, String? icon, Color? color, required VoidCallback? onTap, Key? key}) {
-    final t = context.tk;
-    return Expanded(
-      child: Tap(
-        key: key,
-        onTap: onTap,
-        color: t.sunk,
-        radius: BorderRadius.circular(12),
-        child: SizedBox(
-          height: 44,
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (icon != null) ...[AppIcon(icon, size: 17, color: color ?? t.ink), const SizedBox(width: 7)],
-            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(14, weight: 650, color: color ?? t.ink))),
-          ]),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = context.tk;
     final bot = widget.bot;
-    final conv = widget.conv;
     final bottom = MediaQuery.of(context).padding.bottom;
     Widget wrap(Widget child) => Container(
           decoration: BoxDecoration(color: t.pane, border: Border(top: BorderSide(color: t.line))),
@@ -239,20 +219,6 @@ class _BotFooterState extends State<BotFooter> {
         ),
       ]));
     }
-    if (bot.commands.isEmpty) {
-      final muted = conv.isMuted();
-      return wrap(Row(children: [
-        _button(
-          context,
-          label: context.t(muted ? 'bots.unmute' : 'bots.silent'),
-          icon: muted ? 'mute' : 'bell',
-          onTap: () => unawaited(patchConversation(conv.id, ConversationSettingsPatch(setMuted: true, mutedUntil: muted ? null : _muteForever))),
-        ),
-        const SizedBox(width: 8),
-        _button(context, key: const ValueKey('bot-stop'), label: context.t('bots.stop'), color: t.danger, onTap: () => unawaited(confirmStopBot(context, bot))),
-      ]));
-    }
-
     final matches = _matches;
     return Container(
       decoration: BoxDecoration(color: t.pane, border: Border(top: BorderSide(color: t.line))),
@@ -282,17 +248,19 @@ class _BotFooterState extends State<BotFooter> {
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
           child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Tap(
-              semanticLabel: context.t('bots.commands'),
-              radius: BorderRadius.circular(22),
-              onTap: () {
-                _text.text = _text.text.startsWith('/') ? '' : '/';
-                _text.selection = TextSelection.collapsed(offset: _text.text.length);
-                _focus.requestFocus();
-              },
-              child: SizedBox(width: 44, height: 44, child: Center(child: Text('/', style: ts(19, weight: 600, color: t.muted, mono: true)))),
-            ),
-            const SizedBox(width: 4),
+            if (bot.commands.isNotEmpty) ...[
+              Tap(
+                semanticLabel: context.t('bots.commands'),
+                radius: BorderRadius.circular(22),
+                onTap: () {
+                  _text.text = _text.text.startsWith('/') ? '' : '/';
+                  _text.selection = TextSelection.collapsed(offset: _text.text.length);
+                  _focus.requestFocus();
+                },
+                child: SizedBox(width: 44, height: 44, child: Center(child: Text('/', style: ts(19, weight: 600, color: t.muted, mono: true)))),
+              ),
+              const SizedBox(width: 4),
+            ],
             Expanded(
               child: Container(
                 constraints: const BoxConstraints(minHeight: 44),
