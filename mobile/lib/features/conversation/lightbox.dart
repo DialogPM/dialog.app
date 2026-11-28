@@ -13,6 +13,7 @@ import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/ui.dart';
 import 'attachments.dart';
+import 'image_editor.dart';
 
 void openLightbox(BuildContext context, Message message, int index) {
   Navigator.of(context).push(PageRouteBuilder<void>(
@@ -73,6 +74,13 @@ class _LightboxState extends ConsumerState<Lightbox> {
                       style: ts(12, color: Colors.white60)),
                 ]),
               ),
+              // Draw on it, crop it, turn it, and send the result back as a reply.
+              if (isEditableImage(current) && !message.isViewOnce && canSendEdited(message.conversationId))
+                IconBtn('edit', color: Colors.white, tooltip: context.t('annotate.title'), onPressed: () async {
+                  final nav = Navigator.of(context);
+                  // Sent: back to the conversation, where the new message shows.
+                  if (await editAndSendImage(context, message, current) && mounted) nav.pop();
+                }),
               IconBtn('share', color: Colors.white, tooltip: context.t('mobile.share'), onPressed: () => shareAttachment(message, current)),
               IconBtn('download', color: Colors.white, tooltip: context.t('message.save'), onPressed: () => saveAttachment(message, current)),
             ]),

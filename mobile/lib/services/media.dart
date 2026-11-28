@@ -334,6 +334,17 @@ Future<File> exportMedia(String path, String fileName, {bool inUse = true}) asyn
   return dest;
 }
 
+/// A file (not created yet) in a fresh folder of the same kind, for something the app writes
+/// itself and hands to the share sheet (an exported conversation). Delete it with
+/// [discardExport] when done.
+Future<File> newExportFile(String fileName) async {
+  final dir = Directory('${(await _exportRoot()).path}/${Random.secure().nextInt(1 << 32).toRadixString(16)}');
+  await dir.create(recursive: true);
+  _openExports.add(dir.path);
+  final safe = fileName.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_');
+  return File('${dir.path}/${safe.isEmpty ? 'file' : safe}');
+}
+
 Future<void> discardExport(File f) async {
   _openExports.remove(f.parent.path);
   try {

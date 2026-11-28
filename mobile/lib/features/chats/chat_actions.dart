@@ -1,13 +1,23 @@
 // Dialogs and menu actions that apply to a whole conversation (chat list long press, conversation
 // header menu, info pane). Port of app/src/features/chats/dialogs.tsx.
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../app/globals.dart';
+import '../../core/backend.dart' show parseError;
 import '../../core/models.dart';
 import '../../l10n/i18n.dart';
+import '../../services/files.dart';
+import '../../services/media.dart';
 import '../../state/actions.dart';
+import '../../theme/app_theme.dart';
+import '../../util/chat_export.dart';
+import '../../widgets/app_icon.dart';
 import '../../widgets/dialogs.dart';
+import '../../widgets/toast.dart';
 import '../../widgets/ui.dart';
 import '../../util/format.dart' show kDisappearingOptions;
 
@@ -222,6 +232,108 @@ Future<void> confirmLeaveGroup(BuildContext context, Conversation conv) async {
   if (ok) await attempt(() => backend.leaveGroup(conv.id));
 }
 
+const _exportPage = 500;
+
+/// Every message of a conversation, oldest first (the order the conversation shows them in).
+Future<List<Message>> loadAllMessages(String conversationId) async {
+  final seen = <String>{};
+  final all = <Message>[];
+  int? before;
+  while (true) {
+    final page = await backend.getMessages(conversationId, before: before, limit: _exportPage);
+    final fresh = page.where((m) => seen.add(m.id)).toList();
+    all.addAll(fresh);
+    if (page.length < _exportPage || fresh.isEmpty) break;
+    // Pages are cut by arrival time; messages that arrived in the same millisecond as the
+    // last one are asked for again rather than lost (duplicates are dropped above).
+    before = page.map((m) => m.receivedAt).reduce((a, b) => a < b ? a : b) + 1;
+  }
+  return all.reversed.toList();
+}
+
+/// "Export chat": the file leaves the app unencrypted, so the dialog says so first. Returns
+/// "text", "media" or null when cancelled.
+Future<String?> _askExport(BuildContext context, Conversation conv) {
+  return showAppDialog<String>(context, title: context.t('chat.export.title', args: {'name': conv.title}), builder: (ctx) {
+    var value = 'text';
+    return StatefulBuilder(builder: (ctx, setState) {
+      final t = ctx.tk;
+      Widget option(String v, String label, String hint) => Tap(
+            onTap: () => setState(() => value = v),
+            radius: BorderRadius.circular(10),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(padding: const EdgeInsets.only(top: 1), child: RadioDot(on: value == v)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(label, style: ts(14.5, weight: 550, color: t.ink)),
+                  const SizedBox(height: 2),
+                  Text(hint, style: ts(12.5, color: t.muted, height: 1.4)),
+                ]),
+              ),
+            ]),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: t.danger.withValues(alpha: 0.09),
+            border: Border.all(color: t.danger.withValues(alpha: 0.35)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            AppIcon('alert', size: 18, color: t.danger),
+            const SizedBox(width: 10),
+            Expanded(child: Text(ctx.t('chat.export.warning'), style: ts(13.5, color: t.danger, height: 1.4))),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        option('text', ctx.t('chat.export.textOnly'), ctx.t('chat.export.textOnlyHint')),
+        option('media', ctx.t('chat.export.withMedia'), ctx.t('chat.export.withMediaHint')),
+        const SizedBox(height: 12),
+        DialogActions(children: [
+          Btn(label: ctx.t('common.cancel'), kind: BtnKind.secondary, height: 42, expand: false, onPressed: () => Navigator.of(ctx).pop()),
+          Btn(label: ctx.t('chat.export.confirm'), height: 42, expand: false, onPressed: () => Navigator.of(ctx).pop(value)),
+        ]),
+      ]);
+    });
+  });
+}
+
+/// Writes the conversation to a temporary file (text, or an archive with the media) and hands
+/// it to the system's share sheet; the file is removed afterwards.
+Future<void> exportChat(BuildContext context, Conversation conv) async {
+  final lang = context.lang;
+  final choice = await _askExport(context, conv);
+  if (choice == null) return;
+  final withMedia = choice == 'media';
+  final base = exportBaseName(conv.title);
+  notifyOk(translate(lang, 'chat.export.working'));
+  File? out;
+  try {
+    final transcript = buildTranscript(conv, await loadAllMessages(conv.id), lang, withMedia: withMedia);
+    out = await newExportFile('$base.${withMedia ? 'zip' : 'txt'}');
+    final skipped = await backend.exportConversation(
+      conversationId: conv.id,
+      destPath: out.path,
+      text: transcript.text,
+      archive: withMedia,
+      textName: '$base.txt',
+      media: [for (final m in transcript.media) m.toJson()],
+    );
+    if (skipped > 0) notifyOk(translate(lang, 'chat.export.doneSkipped', args: {'count': skipped}));
+    await shareExport(out, withMedia ? 'application/zip' : 'text/plain');
+  } catch (e) {
+    if (out != null) unawaited(discardExport(out));
+    if (parseError(e).message == 'export_too_large') {
+      showToast(translate(lang, 'chat.export.tooLarge'));
+    } else {
+      notifyError(e);
+    }
+  }
+}
+
 /// Actions of the chat list long-press sheet.
 List<SheetAction> listActions(BuildContext context, Conversation conv) {
   final muted = conv.isMuted();
@@ -248,6 +360,7 @@ List<SheetAction> listActions(BuildContext context, Conversation conv) {
       hidden: conv.unreadCount == 0,
       onTap: () => attempt(() => backend.markRead(conv.id)),
     ),
+    SheetAction(label: context.t('chat.export.action'), icon: 'share', onTap: () => exportChat(context, conv)),
     if (conv.isGroup && !conv.left)
       SheetAction(label: context.t('chat.clear.action'), icon: 'eraser', danger: true, onTap: () => confirmClearChat(context, conv))
     else

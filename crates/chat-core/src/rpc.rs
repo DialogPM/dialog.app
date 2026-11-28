@@ -534,6 +534,8 @@ rpc_table! {
     view_once_done(req: MessageIdReq) -> () => |i| i.view_once_done(&req.message_id);
     download_attachment(req: AttachmentReq) -> () => |i| i.download_attachment(&req.message_id, &req.attachment_id).await;
     save_attachment(req: SaveAttachmentReq) -> () => |i| i.save_attachment(&req.message_id, &req.attachment_id, &req.dest_path).await;
+    // The user's export of a conversation (engine/export.rs): the UI writes the transcript.
+    export_conversation(req: crate::engine::export::ExportConversationRequest) -> crate::engine::export::ExportResult => |i| i.export_conversation(req).await;
     search_messages(req: SearchReq) -> Vec<Message> => |i| i.search_messages(&req.query, req.conversation_id.as_deref(), req.limit);
     list_media(req: MediaReq) -> Vec<Message> => |i| i.list_media(&req.conversation_id, &req.kind, req.limit);
     create_group(req: CreateGroupRequest) -> Conversation => |i| i.create_group(req).await;

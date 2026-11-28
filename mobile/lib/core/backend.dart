@@ -870,6 +870,29 @@ class Backend {
   /// Copies a decrypted attachment to a user chosen path.
   Future<void> saveAttachment(String messageId, String attachmentId, String destPath) =>
       call('save_attachment', {'message_id': messageId, 'attachment_id': attachmentId, 'dest_path': destPath});
+
+  /// Writes a conversation to [destPath]: [text] (the transcript, util/chat_export.dart) as it
+  /// is, or with [archive] a ZIP holding the transcript ([textName]) and [media] in a "media"
+  /// folder. The file is not encrypted: only on the user's explicit request. Returns how many
+  /// media files were left out (not on this device, erased, view-once, deleted, expired).
+  Future<int> exportConversation({
+    required String conversationId,
+    required String destPath,
+    required String text,
+    bool archive = false,
+    String? textName,
+    List<Map<String, dynamic>> media = const [],
+  }) async {
+    final r = await _obj('export_conversation', {
+      'conversation_id': conversationId,
+      'dest_path': destPath,
+      'text': text,
+      'archive': archive,
+      'text_name': ?textName,
+      'media': media,
+    });
+    return (r['media_skipped'] as num?)?.toInt() ?? 0;
+  }
   Future<List<Message>> searchMessages(String query, {String? conversationId, int? limit}) async =>
       (await _list('search_messages', {'query': query, 'conversation_id': ?conversationId, 'limit': ?limit}))
           .map(Message.fromJson)

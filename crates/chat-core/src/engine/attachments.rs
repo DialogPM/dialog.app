@@ -388,7 +388,7 @@ impl Inner {
             return Err(retention::expired_error());
         }
         let src = a.local_path.clone().ok_or_else(|| CoreError::invalid("download the attachment first"))?;
-        // The user's export: the only place a decrypted copy is written, where they chose.
+        // The user's export: a decrypted copy is written only where they chose (as in export.rs).
         self.export_media_file(Path::new(&src), Path::new(dest)).await
     }
 

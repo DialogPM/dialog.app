@@ -1,6 +1,7 @@
 // "Send to …" screen for picked photos / videos / documents, with a caption.
 
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../app/globals.dart';
 import '../../core/models.dart';
 import '../../l10n/i18n.dart';
 import '../../services/files.dart';
+import '../../services/media.dart';
 import '../../state/actions.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
@@ -16,6 +18,7 @@ import '../../widgets/app_icon.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/ui.dart';
 import 'attachments.dart';
+import 'image_editor.dart';
 import 'view_once_bubble.dart' show ViewOnceToggle;
 
 void openSendMedia(BuildContext context, String conversationId, List<PickedFile> files, {required bool media}) {
@@ -151,6 +154,31 @@ class _SendMediaPageState extends State<SendMediaPage> {
     }
   }
 
+  /// Opens a picked image in the editor; the edited copy takes its place.
+  Future<void> _edit(PickedFile f) async {
+    final Uint8List bytes;
+    try {
+      bytes = await File(f.path).readAsBytes();
+    } catch (_) {
+      showToast(tr('annotate.loadFailed'), error: true);
+      return;
+    }
+    if (!mounted) return;
+    final edited = await openImageEditor(context, bytes: bytes);
+    if (edited == null || !mounted) return;
+    final name = editedFileName(f.name);
+    final file = File(await appTempPath('edit-$name'));
+    await file.writeAsBytes(edited.bytes, flush: true);
+    final next = PickedFile(path: file.path, name: name, mime: 'image/png', size: edited.bytes.length);
+    // Temporary like the picked copies: removed when the page closes.
+    _picked.add(next);
+    if (!mounted) return;
+    setState(() {
+      final i = _files.indexOf(f);
+      if (i >= 0) _files[i] = next;
+    });
+  }
+
   void _remove(PickedFile f) {
     setState(() => _files.remove(f));
     if (_files.isEmpty) Navigator.of(context).pop();
@@ -174,6 +202,24 @@ class _SendMediaPageState extends State<SendMediaPage> {
             ),
           ),
         );
+    Widget editBtn(PickedFile f) => Positioned(
+          top: 6,
+          left: 6,
+          child: Semantics(
+            button: true,
+            label: context.t('annotate.title'),
+            child: GestureDetector(
+              onTap: _sending ? null : () => _edit(f),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(color: t.ink, shape: BoxShape.circle),
+                child: Center(child: AppIcon('edit', size: 16, color: t.pane)),
+              ),
+            ),
+          ),
+        );
+    bool editable(PickedFile f) => f.isImage && !f.mime.startsWith('image/gif') && !f.mime.startsWith('image/svg');
     Widget preview(PickedFile f, {double? height}) => ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: f.isImage
@@ -194,7 +240,11 @@ class _SendMediaPageState extends State<SendMediaPage> {
     if (widget.media && _files.length == 1) {
       body = Padding(
         padding: const EdgeInsets.all(16),
-        child: Stack(children: [Center(child: preview(_files.first, height: double.infinity)), removeBtn(_files.first)]),
+        child: Stack(children: [
+          Center(child: preview(_files.first, height: double.infinity)),
+          removeBtn(_files.first),
+          if (editable(_files.first)) editBtn(_files.first),
+        ]),
       );
     } else if (widget.media) {
       body = GridView.count(
@@ -202,7 +252,9 @@ class _SendMediaPageState extends State<SendMediaPage> {
         padding: const EdgeInsets.all(16),
         mainAxisSpacing: 8,
         crossAxisSpacing: 8,
-        children: [for (final f in _files) Stack(fit: StackFit.expand, children: [preview(f), removeBtn(f)])],
+        children: [
+          for (final f in _files) Stack(fit: StackFit.expand, children: [preview(f), removeBtn(f), if (editable(f)) editBtn(f)]),
+        ],
       );
     } else {
       body = ListView(padding: const EdgeInsets.all(16), children: [

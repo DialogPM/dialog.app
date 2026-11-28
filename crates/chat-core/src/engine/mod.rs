@@ -21,6 +21,7 @@ mod zk;
 mod contacts;
 mod conversations;
 mod edits;
+pub mod export;
 mod integrity;
 mod groups;
 mod groups_v2;

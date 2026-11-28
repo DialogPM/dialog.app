@@ -109,6 +109,17 @@ Future<void> shareFile(String localPath, String fileName, String mime) async {
   }
 }
 
+/// Hands a file the app wrote with [newExportFile] to the share sheet ("save to files", send
+/// to another app) and removes it afterwards.
+Future<void> shareExport(File file, String mime) async {
+  try {
+    await SharePlus.instance.share(ShareParams(files: [XFile(file.path, mimeType: mime, name: file.uri.pathSegments.last)]));
+  } finally {
+    // The receiving app may still be reading it for a moment.
+    unawaited(Future.delayed(const Duration(minutes: 2), () => discardExport(file)));
+  }
+}
+
 Future<void> shareText(String text, {String? subject}) async {
   await SharePlus.instance.share(ShareParams(text: text, subject: subject));
 }
