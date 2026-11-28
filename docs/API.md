@@ -484,6 +484,16 @@ expire after 30 days (configurable).
 `GET /v1/ws` with `Authorization: Bearer <token>` header (or `?token=` query parameter as a
 fallback for clients that cannot set headers). JSON text frames.
 
+Query parameters, both optional:
+
+* `active=0`: the user is away from this device; it connects without showing the account
+  online.
+* `os=windows|macos|linux`: sent by a desktop app (`platform` `desktop`), so the operator can
+  see in the admin statistics which systems the accounts use (docs/ADMIN-API.md,
+  `GET /v1/admin/platforms`). The server keeps that one word on the device; any other value,
+  and the parameter from a device of another platform, is ignored. Clients send no version,
+  model or other detail of the system.
+
 On connect the server first sends all queued envelopes (oldest first), then
 `{"type":"queue_empty"}`. New envelopes are pushed immediately as they arrive.
 Only one socket per device: a new connection closes the previous one.

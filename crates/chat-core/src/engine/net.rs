@@ -70,6 +70,20 @@ enum SocketEnd {
     AccountDeleted,
 }
 
+/// What a desktop app tells the server about its system on the delivery socket (`?os=`):
+/// one of three words, for the operator's statistics per platform. Nothing on a phone (its
+/// platform already says Android or iOS) and nothing on a system outside the list.
+fn desktop_os(platform: &str) -> Option<&'static str> {
+    desktop_os_of(platform, std::env::consts::OS)
+}
+
+fn desktop_os_of(platform: &str, os: &str) -> Option<&'static str> {
+    if platform != "desktop" {
+        return None;
+    }
+    ["windows", "macos", "linux"].into_iter().find(|k| *k == os)
+}
+
 impl Inner {
     pub fn set_conn_state(&self, state: ConnState) {
         if self.conn_state.get() != state {
@@ -185,6 +199,12 @@ impl Inner {
         if self.away_since.get().is_some() {
             // Connecting while away: the server does not show the account online meanwhile.
             url.push_str("?active=0");
+        }
+        if let Some(os) = desktop_os(&self.platform) {
+            // The operator's statistics per platform: mobile devices are told apart by their
+            // platform, a desktop adds which system it runs on. Just the word, no version.
+            url.push_str(if url.contains('?') { "&os=" } else { "?os=" });
+            url.push_str(os);
         }
         let mut req = url
             .into_client_request()
@@ -415,6 +435,22 @@ impl Inner {
                 log::warn!("key refresh: {e}");
             }
             self.refresh_stale_profiles().await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod os_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_desktop_names_its_system_and_only_in_one_word() {
+        assert_eq!(desktop_os_of("desktop", "linux"), Some("linux"));
+        assert_eq!(desktop_os_of("desktop", "macos"), Some("macos"));
+        assert_eq!(desktop_os_of("desktop", "windows"), Some("windows"));
+        assert_eq!(desktop_os_of("desktop", "freebsd"), None);
+        for platform in ["android", "ios", "web", "cli", "test"] {
+            assert_eq!(desktop_os_of(platform, "linux"), None, "{platform}");
         }
     }
 }
